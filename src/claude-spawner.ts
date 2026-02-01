@@ -15,6 +15,7 @@ const childProcessRegistry = new Map<number, ChildProcess>();
 
 /**
  * Spawn a Claude CLI process
+ * @param timeoutMs - If undefined or 0, no timeout is applied (process runs indefinitely)
  */
 export function spawnClaudeProcess(options: {
   project: Project;
@@ -23,8 +24,9 @@ export function spawnClaudeProcess(options: {
   output?: string;
   timeoutMs?: number;
   permissionMode?: 'acceptEdits' | 'bypassPermissions' | 'default' | 'delegate' | 'dontAsk' | 'plan';
+  onOutput?: (data: string) => void;  // Callback for real-time output streaming
 }): ClaudeProcess {
-  const { project, prompt, model, output, timeoutMs, permissionMode = 'acceptEdits' } = options;
+  const { project, prompt, model, output, timeoutMs, permissionMode = 'acceptEdits', onOutput } = options;
 
   // Verify project path exists
   if (!existsSync(project.path)) {
@@ -109,6 +111,8 @@ export function spawnClaudeProcess(options: {
     const output = data.toString();
     console.debug(`[claude-spawner] PID ${claudeProc.pid} stdout: ${output.slice(0, 200)}${output.length > 200 ? "..." : ""}`);
     addOutput(output);
+    // Call streaming callback if provided
+    onOutput?.(output);
   });
 
   // Handle stderr
@@ -134,8 +138,8 @@ export function spawnClaudeProcess(options: {
     childProcessRegistry.delete(claudeProc.pid);
   });
 
-  // Set timeout if specified
-  if (timeoutMs) {
+  // Set timeout if specified (only if timeoutMs is provided and > 0)
+  if (timeoutMs && timeoutMs > 0) {
     const timeoutHandle = setTimeout(() => {
       if (claudeProc.status === "running") {
         claudeProc.status = "error";
@@ -168,24 +172,33 @@ export function spawnClaudeProcess(options: {
 
 /**
  * Wait for a Claude process to complete and get result
+ * @param timeoutMs - If undefined or 0, no timeout is applied (process runs indefinitely)
  */
 export async function waitForClaudeProcess(
   process: ClaudeProcess,
   timeoutMs?: number
 ): Promise<ClaudeCliResult> {
   return new Promise((resolve, reject) => {
-    const timeout = timeoutMs ?? 300_000; // 5 minutes default
+    // Only apply timeout if specified and > 0
+    const timeout = timeoutMs && timeoutMs > 0 ? timeoutMs : null;
 
-    const timeoutHandle = setTimeout(() => {
-      clearInterval(checkInterval);
-      reject(new Error(`Claude process timed out after ${timeout}ms`));
-    }, timeout);
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    let safetyTimeout: NodeJS.Timeout | null = null;
 
-    // Safety timeout to prevent unbounded polling (2x the main timeout)
-    const safetyTimeout = setTimeout(() => {
-      clearInterval(checkInterval);
-      reject(new Error(`Process wait exceeded safety limit (${timeout * 2}ms)`));
-    }, timeout * 2);
+    if (timeout !== null) {
+      timeoutHandle = setTimeout(() => {
+        clearInterval(checkInterval);
+        if (safetyTimeout) clearTimeout(safetyTimeout);
+        reject(new Error(`Claude process timed out after ${timeout}ms`));
+      }, timeout);
+
+      // Safety timeout to prevent unbounded polling (2x the main timeout)
+      safetyTimeout = setTimeout(() => {
+        clearInterval(checkInterval);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        reject(new Error(`Process wait exceeded safety limit (${timeout * 2}ms)`));
+      }, timeout * 2);
+    }
 
     // Check if process completed
     const checkInterval = setInterval(() => {
@@ -194,8 +207,8 @@ export async function waitForClaudeProcess(
         process.status === "error" ||
         process.status === "cancelled"
       ) {
-        clearTimeout(timeoutHandle);
-        clearTimeout(safetyTimeout);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (safetyTimeout) clearTimeout(safetyTimeout);
         clearInterval(checkInterval);
 
         const result: ClaudeCliResult = {
