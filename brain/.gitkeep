@@ -1,0 +1,20 @@
+# Claude Bridge Native CLI - Brain Directory
+
+This directory contains the persistent memory, identity, and knowledge systems
+that make the bot an intelligent agentic coder.
+
+## Directory Structure
+
+```
+brain/
+├── identity/          # Identity, personality, preferences
+├── memory/            # Conversation history, embeddings, knowledge
+├── projects/          # Per-project context and decisions
+├── tasks/             # Task queue and history
+├── heartbeats/        # Activity logs and metrics
+└── logs/              # Error logs and audit trails
+```
+
+## Initialization
+
+The brain is automatically initialized on first run.

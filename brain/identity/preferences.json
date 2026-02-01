@@ -1,0 +1,35 @@
+{
+  "user": {
+    "name": "Ernest",
+    "timezone": "UTC",
+    "workingHours": {
+      "start": 9,
+      "end": 18,
+      "timezone": "UTC"
+    }
+  },
+  "notifications": {
+    "enabled": true,
+    "quietHours": {
+      "start": 22,
+      "end": 8
+    },
+    "priorityLevels": {
+      "error": "immediate",
+      "warning": "digest",
+      "info": "digest",
+      "success": "digest"
+    }
+  },
+  "git": {
+    "defaultBranch": "main",
+    "autoPush": false,
+    "signCommits": false,
+    "commitMessageStyle": "conventional"
+  },
+  "projects": {
+    "defaultBase": "C:\\Users\\ErnestHome\\DEVPROJECTS",
+    "autoDetect": true,
+    "watchForChanges": true
+  }
+}
