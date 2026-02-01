@@ -1,0 +1,18 @@
+{
+  "step": "complete",
+  "data": {
+    "userName": "Call me Ernesto",
+    "timezone": "EET (UTC+2), Athens",
+    "languages": [
+      "Typescript",
+      "React.js",
+      "next.js",
+      "python",
+      "js",
+      "react native etc."
+    ],
+    "codeStyle": "concise",
+    "gitBranch": "usually its main, but some projects may have different default names.",
+    "projectsBase": "C:\\Users\\ErnestHome\\DEVPROJECTS"
+  }
+}
