@@ -29,12 +29,14 @@ export class ClaudeSpawner {
     prompt: string;
     model?: string;
     output?: string;
+    onOutput?: (data: string) => void;
   }): ClaudeProcess {
     const process = spawnClaudeProcess({
       ...options,
       model: options.model || this.config.claudeDefaultModel,
       permissionMode: this.config.claudePermissionMode,
       timeoutMs: this.config.claudeTimeoutMs,
+      onOutput: options.onOutput,
     });
 
     this.activeProcesses.set(process.pid, process);
