@@ -25,7 +25,7 @@ const configSchema = z.object({
 
   // Claude CLI
   claudeDefaultModel: z.string().default("claude-3-5-sonnet"),
-  claudeTimeoutMs: z.number().default(300_000), // 5 minutes
+  claudeTimeoutMs: z.number().default(0), // 0 = no timeout (run indefinitely), 300000 = 5 minutes
   claudePermissionMode: z.enum(["acceptEdits", "bypassPermissions", "default", "delegate", "dontAsk", "plan"]).default("acceptEdits"),
 
   // Sessions
@@ -131,7 +131,7 @@ function transformConfig(raw: RawConfig): BridgeConfig {
     projectsBase: raw.projectsBase ?? "C:\\Users\\ErnestHome\\DEVPROJECTS",
     autoScanIntervalMs: raw.autoScanIntervalMs ?? 300_000,
     claudeDefaultModel: raw.claudeDefaultModel ?? "claude-3-5-sonnet",
-    claudeTimeoutMs: raw.claudeTimeoutMs ?? 300_000,
+    claudeTimeoutMs: raw.claudeTimeoutMs ?? 0, // 0 = no timeout (run indefinitely)
     claudePermissionMode: raw.claudePermissionMode ?? "acceptEdits",
     sessionTimeoutMs: raw.sessionTimeoutMs ?? 3600000,
     maxConcurrentSessions: raw.maxConcurrentSessions ?? 5,
