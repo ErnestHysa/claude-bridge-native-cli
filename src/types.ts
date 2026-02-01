@@ -46,6 +46,7 @@ export interface ClaudeProcess {
   startTime: number;
   status: 'starting' | 'running' | 'completed' | 'error' | 'cancelled';
   outputBuffer: string[];
+  onOutput?: (data: string) => void;  // Streaming callback
 }
 
 export interface ConversationMessage {
