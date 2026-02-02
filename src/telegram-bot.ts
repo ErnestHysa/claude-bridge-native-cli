@@ -23,6 +23,9 @@ import {
   getNotificationRouter,
   getCodeAnalyzer,
   getPatternLearner,
+  getIntentionEngine,
+  getDecisionMaker,
+  getGoalSystem,
   type SetupWizard,
   type AgentType,
   type NotificationType,
@@ -173,6 +176,14 @@ export class TelegramBotHandler {
       { command: "briefing", description: "Generate daily briefing" },
       { command: "checks", description: "Run proactive checks" },
       { command: "selfreview", description: "View learning log" },
+      // Autonomous AI commands
+      { command: "intentions", description: "View active intentions" },
+      { command: "decisions", description: "View recent AI decisions" },
+      { command: "goals", description: "View goals and progress" },
+      { command: "autonomous", description: "Autonomous mode status" },
+      { command: "permissions", description: "View/set permission level" },
+      { command: "approve", description: "Approve a pending action" },
+      { command: "deny", description: "Deny a pending action" },
     ]).catch((err) => {
       this.logger.error("Failed to set bot commands", {
         error: err instanceof Error ? err.message : String(err),
@@ -252,6 +263,29 @@ export class TelegramBotHandler {
     this.bot.onText(/\/briefing/, (msg) => this.handleBriefing(msg));
     this.bot.onText(/\/checks/, (msg) => this.handleChecks(msg));
     this.bot.onText(/\/selfreview/, (msg) => this.handleSelfReview(msg));
+
+    // Autonomous AI commands
+    this.bot.onText(/\/intentions(?:\s+(.+))?/, (msg, match) =>
+      this.handleIntentions(msg, match?.[1])
+    );
+    this.bot.onText(/\/decisions(?:\s+(.+))?/, (msg, match) =>
+      this.handleDecisions(msg, match?.[1])
+    );
+    this.bot.onText(/\/goals(?:\s+(.+))?/, (msg, match) =>
+      this.handleGoals(msg, match?.[1])
+    );
+    this.bot.onText(/\/autonomous(?:\s+(.+))?/, (msg, match) =>
+      this.handleAutonomous(msg, match?.[1])
+    );
+    this.bot.onText(/\/permissions(?:\s+(.+))?/, (msg, match) =>
+      this.handlePermissions(msg, match?.[1])
+    );
+    this.bot.onText(/^\/approve(?:\s+(.+))?$/, (msg, match) =>
+      this.handleApprove(msg, match?.[1])
+    );
+    this.bot.onText(/^\/deny(?:\s+(.+))?$/, (msg, match) =>
+      this.handleDeny(msg, match?.[1])
+    );
 
     // Semantic search command
     this.bot.onText(/\/semantic(?:\s+(.+))?$/, (msg, match) =>
@@ -457,6 +491,15 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 /briefing - Generate daily briefing
 /checks - Run proactive checks
 /selfreview - View learning log
+
+<b>Autonomous AI 🤖</b>
+/intentions - View active intentions
+/decisions - View pending/approved decisions
+/goals - Manage goals
+/autonomous &lt;on|off|status&gt; - Toggle autonomous mode
+/permissions &lt;level&gt; - Set permission level
+/approve &lt;id&gt; - Approve pending action
+/deny &lt;id&gt; - Deny pending action
 
 <b>Workflow:</b>
 1. Select a project using /select
@@ -2674,6 +2717,411 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       awaiting_approval: "⏳ Awaiting Approval",
     };
     return statusEmojis[status] || status;
+  }
+
+  /**
+   * Handle /intentions command - View active intentions
+   */
+  private async handleIntentions(msg: Message, action?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const intentionEngine = getIntentionEngine();
+    const session = this.sessionManager.getSession(chatId);
+    const projectPath = session?.currentProject?.path || "";
+
+    // Handle actions: remove, clear
+    if (action === "clear") {
+      const cleared = intentionEngine.clearExpired();
+      await this.bot.sendMessage(chatId, `🗑️ Cleared ${cleared} expired intentions.`);
+      return;
+    }
+
+    if (action?.startsWith("remove:")) {
+      const intentionId = action.split(":")[1];
+      const removed = intentionEngine.removeIntention(intentionId);
+      if (removed) {
+        await this.bot.sendMessage(chatId, `✅ Intention removed.`);
+      } else {
+        await this.bot.sendMessage(chatId, `❌ Intention not found.`);
+      }
+      return;
+    }
+
+    // Show all intentions for this user/project
+    const intentions = intentionEngine.getIntentions({
+      chatId,
+      projectPath,
+      active: true,
+    });
+
+    if (intentions.length === 0) {
+      await this.bot.sendMessage(chatId, "📭 No active intentions.\n\nIntentions are created automatically when triggers are detected (test failures, high complexity, etc.).");
+      return;
+    }
+
+    let message = `💭 <b>Active Intentions (${intentions.length})</b>\n\n`;
+
+    for (const intention of intentions.slice(0, 10)) {
+      const priorityEmoji = intention.priority === "urgent" ? "🔴" :
+                           intention.priority === "high" ? "🟠" :
+                           intention.priority === "medium" ? "🟡" : "🟢";
+      const typeEmoji = this.getIntentionTypeEmoji(intention.type);
+
+      message += `${priorityEmoji} ${typeEmoji} <b>${escapeHtml(intention.title)}</b>\n`;
+      message += `   ID: ${intention.id.substring(0, 16)}...\n`;
+      message += `   ${escapeHtml(intention.description.substring(0, 100))}${intention.description.length > 100 ? "..." : ""}\n`;
+      message += `   Confidence: ${Math.round(intention.confidence * 100)}%\n\n`;
+    }
+
+    if (intentions.length > 10) {
+      message += `\n... and ${intentions.length - 10} more`;
+    }
+
+    message += `\n<i>Actions: /intentions clear, /intentions remove:&lt;id&gt;</i>`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+  }
+
+  /**
+   * Handle /decisions command - View pending/approved decisions
+   */
+  private async handleDecisions(msg: Message, filter?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const decisionMaker = getDecisionMaker();
+
+    // Get all decisions and filter for this user
+    const allDecisions = decisionMaker.getDecisions({
+      requiresApproval: filter === "pending" ? true : undefined,
+      active: true,
+    });
+
+    // Filter by chatId - we store chatId in the decision metadata or filter by checking intention source
+    const decisions = allDecisions.filter(() => {
+      // Since decisions don't directly have chatId, we'd need to check through the intention
+      // For now, show all active decisions
+      return true;
+    });
+
+    if (decisions.length === 0) {
+      const status = filter === "pending" ? "pending" : "recent";
+      await this.bot.sendMessage(chatId, `📋 No ${status} decisions.\n\nDecisions are created when the AI evaluates intentions and determines actions to take.`);
+      return;
+    }
+
+    let message = `🤔 <b>Decisions (${decisions.length})</b>\n\n`;
+
+    for (const decision of decisions.slice(0, 10)) {
+      const statusEmoji = decision.requiresApproval ? "⏳" :
+                         decision.canAutoExecute ? "✅" : "❌";
+
+      message += `${statusEmoji} <b>${escapeHtml(decision.id.substring(0, 12))}</b>\n`;
+      message += `   ${escapeHtml(decision.reasoning.substring(0, 80))}...\n`;
+
+      if (decision.requiresApproval) {
+        message += `   <i>Requires approval - /approve ${decision.id}</i>\n`;
+      }
+
+      if (decision.risks.length > 0) {
+        message += `   ⚠️ Risks: ${decision.risks.length}\n`;
+      }
+
+      message += "\n";
+    }
+
+    if (decisions.length > 10) {
+      message += `\n... and ${decisions.length - 10} more`;
+    }
+
+    message += `\n<i>Filters: /decisions pending</i>`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+  }
+
+  /**
+   * Handle /goals command - Manage goals
+   */
+  private async handleGoals(msg: Message, action?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const goalSystem = getGoalSystem();
+    const session = this.sessionManager.getSession(chatId);
+    const projectPath = session?.currentProject?.path;
+
+    // Handle subcommands
+    if (action?.startsWith("create:")) {
+      // Usage: /goals create:quality|feature|maintenance|learning <title> <description>
+      const args = action.substring(7).split(":");
+      if (args.length >= 2) {
+        // For now, simple implementation
+        await this.bot.sendMessage(chatId, "📝 Goal creation via chat is limited. Use the full CLI or web interface for detailed goal setup.\n\nExample goal types:\n• quality - Test coverage, complexity reduction\n• feature - Implement new features\n• maintenance - Reduce tech debt, dependencies\n• learning - Understand codebase");
+        return;
+      }
+    }
+
+    if (action?.startsWith("complete:")) {
+      const goalId = action.split(":")[1];
+      const success = await goalSystem.completeGoal(goalId);
+      if (success) {
+        await this.bot.sendMessage(chatId, `✅ Goal ${goalId} marked as complete!`);
+      } else {
+        await this.bot.sendMessage(chatId, `❌ Failed to complete goal ${goalId}`);
+      }
+      return;
+    }
+
+    if (action?.startsWith("pause:")) {
+      const goalId = action.split(":")[1];
+      const success = await goalSystem.pauseGoal(goalId);
+      if (success) {
+        await this.bot.sendMessage(chatId, `⏸️ Goal ${goalId} paused.`);
+      } else {
+        await this.bot.sendMessage(chatId, `❌ Failed to pause goal ${goalId}`);
+      }
+      return;
+    }
+
+    if (action?.startsWith("resume:")) {
+      const goalId = action.split(":")[1];
+      const success = await goalSystem.resumeGoal(goalId);
+      if (success) {
+        await this.bot.sendMessage(chatId, `▶️ Goal ${goalId} resumed.`);
+      } else {
+        await this.bot.sendMessage(chatId, `❌ Failed to resume goal ${goalId}`);
+      }
+      return;
+    }
+
+    // Show goals
+    const goals = goalSystem.getGoals({
+      chatId,
+      projectPath,
+    });
+
+    if (goals.length === 0) {
+      await this.bot.sendMessage(chatId, "🎯 No goals set.\n\n<b>Create a goal:</b>\n/goals create:&lt;type&gt; &lt;title&gt;\n\n<b>Types:</b> quality, feature, maintenance, learning");
+      return;
+    }
+
+    let message = `🎯 <b>Goals (${goals.length})</b>\n\n`;
+
+    for (const goal of goals.slice(0, 10)) {
+      const typeEmoji = goal.type === "quality" ? "📊" :
+                       goal.type === "feature" ? "✨" :
+                       goal.type === "maintenance" ? "🔧" : "📚";
+      const statusEmoji = goal.status === "active" ? "▶️" :
+                         goal.status === "paused" ? "⏸️" :
+                         goal.status === "completed" ? "✅" : "🚫";
+
+      const progressBar = "█".repeat(Math.floor(goal.progress / 10)) +
+                         "░".repeat(10 - Math.floor(goal.progress / 10));
+
+      message += `${statusEmoji} ${typeEmoji} <b>${escapeHtml(goal.title)}</b>\n`;
+      message += `   [${progressBar}] ${goal.progress}%\n`;
+      message += `   ${goal.target.current}/${goal.target.target} ${goal.target.unit || ""}\n\n`;
+    }
+
+    if (goals.length > 10) {
+      message += `\n... and ${goals.length - 10} more`;
+    }
+
+    message += `\n<i>Actions: /goals pause:&lt;id&gt;, /goals resume:&lt;id&gt;, /goals complete:&lt;id&gt;</i>`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+  }
+
+  /**
+   * Handle /autonomous command - Toggle autonomous mode
+   */
+  private async handleAutonomous(msg: Message, action?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const memory = getMemoryStore();
+
+    const storageKey = `autonomous_mode:${chatId}`;
+
+    if (action === "on") {
+      await memory.setFact(storageKey, { enabled: true, since: Date.now() });
+      await this.bot.sendMessage(chatId, "🤖 <b>Autonomous mode enabled</b>\n\nThe AI will now proactively work on goals and take actions based on your permission level.\n\nUse /permissions to set your permission level.");
+      return;
+    }
+
+    if (action === "off") {
+      await memory.setFact(storageKey, { enabled: false, since: Date.now() });
+      await this.bot.sendMessage(chatId, "🔒 <b>Autonomous mode disabled</b>\n\nThe AI will not take autonomous actions. You can still use all commands manually.");
+      return;
+    }
+
+    // Show status
+    const setting = await memory.getFact(storageKey) as { enabled: boolean } | undefined;
+    const isEnabled = setting?.enabled ?? false;
+
+    await this.bot.sendMessage(
+      chatId,
+      `🤖 <b>Autonomous Mode</b>\n\nStatus: ${isEnabled ? "✅ Enabled" : "❌ Disabled"}\n\n<b>Actions:</b>\n/autonomous on - Enable autonomous mode\n/autonomous off - Disable autonomous mode`,
+      { parse_mode: "HTML" }
+    );
+  }
+
+  /**
+   * Handle /permissions command - Set permission level
+   */
+  private async handlePermissions(msg: Message, level?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const memory = getMemoryStore();
+
+    const validLevels = ["read_only", "advisory", "supervised", "autonomous", "full"];
+    const storageKey = `permission_level:${chatId}`;
+
+    if (level && validLevels.includes(level)) {
+      await memory.setFact(storageKey, {
+        level,
+        updatedAt: Date.now(),
+      });
+
+      const descriptions: Record<string, string> = {
+        read_only: "AI can only read and analyze, no changes",
+        advisory: "AI suggests actions but doesn't execute",
+        supervised: "AI can act with approval for significant changes",
+        autonomous: "AI can act independently on non-critical tasks",
+        full: "AI has full autonomy (use with caution)",
+      };
+
+      await this.bot.sendMessage(
+        chatId,
+        `🔐 <b>Permission level set to: ${level}</b>\n\n${descriptions[level]}`
+      );
+      return;
+    }
+
+    // Show current level
+    const setting = await memory.getFact(storageKey) as { level: string } | undefined;
+    const currentLevel = setting?.level || "supervised";
+
+    let message = `🔐 <b>Permission Level</b>\n\nCurrent: <b>${currentLevel}</b>\n\n<b>Available levels:</b>\n`;
+    message += `👁️ read_only - Read only, no changes\n`;
+    message += `💡 advisory - Suggest only\n`;
+    message += `👥 supervised - Require approval (default)\n`;
+    message += `🤖 autonomous - Auto non-critical actions\n`;
+    message += `⚡ full - Full autonomy\n\n`;
+    message += `<i>Usage: /permissions &lt;level&gt;</i>`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+  }
+
+  /**
+   * Handle /approve command - Approve a pending action
+   */
+  private async handleApprove(msg: Message, decisionId?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const decisionMaker = getDecisionMaker();
+
+    if (!decisionId) {
+      await this.bot.sendMessage(chatId, "Usage: /approve <decision_id>\n\nUse /decisions to see pending actions.");
+      return;
+    }
+
+    const decision = decisionMaker.getDecision(decisionId);
+    if (!decision) {
+      await this.bot.sendMessage(chatId, `❌ Decision ${decisionId} not found.`);
+      return;
+    }
+
+    // Approve the decision by overriding to execute
+    const overridden = decisionMaker.overrideDecision(decisionId, true);
+
+    if (overridden) {
+      await this.bot.sendMessage(
+        chatId,
+        `✅ <b>Action Approved</b>\n\n${escapeHtml(decision.reasoning)}\n\nThe action will now be executed.`,
+        { parse_mode: "HTML" }
+      );
+    } else {
+      await this.bot.sendMessage(chatId, `❌ Failed to approve decision ${decisionId}. It may have expired or already been processed.`);
+    }
+  }
+
+  /**
+   * Handle /deny command - Deny a pending action
+   */
+  private async handleDeny(msg: Message, decisionId?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const decisionMaker = getDecisionMaker();
+
+    if (!decisionId) {
+      await this.bot.sendMessage(chatId, "Usage: /deny <decision_id>\n\nUse /decisions to see pending actions.");
+      return;
+    }
+
+    const decision = decisionMaker.getDecision(decisionId);
+    if (!decision) {
+      await this.bot.sendMessage(chatId, `❌ Decision ${decisionId} not found.`);
+      return;
+    }
+
+    // Deny the decision by overriding to not execute
+    const overridden = decisionMaker.overrideDecision(decisionId, false);
+
+    if (overridden) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ <b>Action Denied</b>\n\n${escapeHtml(decision.reasoning)}\n\nThe action will not be executed.`,
+        { parse_mode: "HTML" }
+      );
+    } else {
+      await this.bot.sendMessage(chatId, `❌ Failed to deny decision ${decisionId}. It may have already been processed.`);
+    }
+  }
+
+  /**
+   * Get emoji for intention type
+   */
+  private getIntentionTypeEmoji(type: string): string {
+    const emojis: Record<string, string> = {
+      test: "🧪",
+      fix: "🔧",
+      refactor: "♻️",
+      implement: "✨",
+      update: "📦",
+      analyze: "🔍",
+      optimize: "⚡",
+      document: "📝",
+      review: "👀",
+      deploy: "🚀",
+      learn: "🧠",
+    };
+    return emojis[type] || "💭";
   }
 
   /**
