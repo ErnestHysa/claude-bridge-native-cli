@@ -39,13 +39,13 @@ async function main(): Promise<void> {
     });
 
     // Start the bot
-    bot.start();
+    await bot.start();
     logger.info("Bot is running. Press Ctrl+C to stop.");
 
     // Start session cleanup timer (runs every 15 minutes)
     const sessionManager = bot.getSessionManager();
-    sessionCleanupInterval = setInterval(() => {
-      const removed = sessionManager.cleanupIdleSessions(config.sessionTimeoutMs);
+    sessionCleanupInterval = setInterval(async () => {
+      const removed = await sessionManager.cleanupIdleSessions(config.sessionTimeoutMs);
       if (removed.length > 0) {
         logger.info("Cleaned up idle sessions", { count: removed.length });
       }

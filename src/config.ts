@@ -26,7 +26,7 @@ const configSchema = z.object({
   // Claude CLI
   claudeDefaultModel: z.string().default("claude-3-5-sonnet"),
   claudeTimeoutMs: z.number().default(0), // 0 = no timeout (run indefinitely), 300000 = 5 minutes
-  claudePermissionMode: z.enum(["acceptEdits", "bypassPermissions", "default", "delegate", "dontAsk", "plan"]).default("acceptEdits"),
+  claudePermissionMode: z.enum(["acceptEdits", "bypassPermissions", "default", "delegate", "dontAsk", "plan"]).default("bypassPermissions"), // bypassPermissions needed for bot (stdin ignored)
 
   // Sessions
   sessionTimeoutMs: z.number().default(3600000), // 1 hour
@@ -132,7 +132,7 @@ function transformConfig(raw: RawConfig): BridgeConfig {
     autoScanIntervalMs: raw.autoScanIntervalMs ?? 300_000,
     claudeDefaultModel: raw.claudeDefaultModel ?? "claude-3-5-sonnet",
     claudeTimeoutMs: raw.claudeTimeoutMs ?? 0, // 0 = no timeout (run indefinitely)
-    claudePermissionMode: raw.claudePermissionMode ?? "acceptEdits",
+    claudePermissionMode: raw.claudePermissionMode ?? "bypassPermissions", // Changed to bypassPermissions for bot use (stdin is ignored)
     sessionTimeoutMs: raw.sessionTimeoutMs ?? 3600000,
     maxConcurrentSessions: raw.maxConcurrentSessions ?? 5,
     autoApproveSafeEdits: raw.autoApproveSafeEdits ?? true,
