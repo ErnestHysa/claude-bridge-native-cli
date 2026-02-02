@@ -1,0 +1,24 @@
+{
+  "chatId": 909460560,
+  "firstName": "Ernest",
+  "lastName": "Hysa",
+  "currentProject": {
+    "name": "claude-bridge-native-cli",
+    "path": "C:\\Users\\ErnestHome\\DEVPROJECTS\\claude-bridge-native-cli",
+    "isGit": true,
+    "lastModified": 1770039768662.1016,
+    "sessionCount": 0,
+    "branch": "main",
+    "status": "active"
+  },
+  "conversationHistory": [
+    {
+      "role": "user",
+      "content": "can you update the current readme.md and append new changes that would be nice to include there but keeping the core of the readme? when you are done commit and push all of the new changes to github, you will group them logically and you will have max 30-40 commits to push (may be less may be more).",
+      "timestamp": 1770041510461
+    }
+  ],
+  "status": "idle",
+  "lastActivity": 1770041510461,
+  "savedAt": 1770041510461
+}
