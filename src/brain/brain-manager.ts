@@ -26,6 +26,7 @@ const PROJECTS_DIR = join(BRAIN_DIR, 'projects');
 const TASKS_DIR = join(BRAIN_DIR, 'tasks');
 const HEARTBEATS_DIR = join(BRAIN_DIR, 'heartbeats');
 const LOGS_DIR = join(BRAIN_DIR, 'logs');
+const SESSIONS_DIR = join(BRAIN_DIR, 'sessions');
 
 /**
  * Brain Manager class - coordinates all brain subsystems
@@ -75,6 +76,7 @@ export class BrainManager {
       TASKS_DIR,
       HEARTBEATS_DIR,
       LOGS_DIR,
+      SESSIONS_DIR,
       join(MEMORY_DIR, 'conversations'),
       join(MEMORY_DIR, 'embeddings'),
       join(MEMORY_DIR, 'knowledge'),
@@ -240,6 +242,10 @@ export class BrainManager {
 
   getTasksDir(): string {
     return TASKS_DIR;
+  }
+
+  getSessionsDir(): string {
+    return SESSIONS_DIR;
   }
 }
 

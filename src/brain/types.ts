@@ -54,6 +54,7 @@ export interface UserPreferences {
   user: {
     name: string;
     timezone: string;
+    location?: string; // For weather briefing (e.g., "Kos,Greece")
     workingHours: {
       start: number;
       end: number;

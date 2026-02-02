@@ -5,7 +5,7 @@
  * Each user/chat gets their own setup state
  */
 
-import { writeFile, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFile, readFileSync, existsSync, mkdirSync, unlink } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -376,7 +376,6 @@ Ready to code? Send a message or type /help!`;
 
     const statePath = this.getStatePath();
     if (existsSync(statePath)) {
-      const { unlink } = require('node:fs');
       unlink(statePath, (err: Error | null) => {
         if (err) console.error(`Failed to delete setup state for chat ${this.chatId}:`, err);
       });

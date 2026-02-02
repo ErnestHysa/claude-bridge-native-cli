@@ -12,6 +12,7 @@ import { readFile, writeFile, readdir, unlink, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getBrain } from '../brain-manager.js';
+import { getVectorStore } from './vector-store.js';
 import type {
   ConversationMemory,
   ProjectMemory,
@@ -73,6 +74,9 @@ export class MemoryStore {
 
     // Load facts into cache
     await this.loadFacts();
+
+    // Initialize vector store
+    await getVectorStore().initialize();
   }
 
   // ===========================================
@@ -477,35 +481,46 @@ export class MemoryStore {
 
   /**
    * Store an embedding for semantic search
-   * Note: This is a placeholder for future vector database integration
    */
   async storeEmbedding(
     id: string,
     text: string,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
-    // TODO: Implement with sqlite-vec or similar
-    // For now, just store the text
-    const embeddingPath = join(this.knowledgeDir, `${id}.json`);
-    await writeFile(embeddingPath, JSON.stringify({
-      text,
-      metadata,
-      createdAt: Date.now(),
-    }, null, 2));
+    const vectorStore = getVectorStore();
+    await vectorStore.storeEmbedding(id, text, metadata);
   }
 
   /**
    * Semantic search through stored memories
-   * Note: Placeholder for future implementation
    */
-  async semanticSearch(_query: string, _limit = 5): Promise<Array<{
+  async semanticSearch(
+    query: string,
+    limit = 5
+  ): Promise<Array<{
     id: string;
     text: string;
     similarity: number;
     metadata?: Record<string, unknown>;
   }>> {
-    // TODO: Implement vector similarity search
-    return [];
+    const vectorStore = getVectorStore();
+    return await vectorStore.semanticSearch(query, limit);
+  }
+
+  /**
+   * Delete an embedding
+   */
+  async deleteEmbedding(id: string): Promise<boolean> {
+    const vectorStore = getVectorStore();
+    return await vectorStore.deleteEmbedding(id);
+  }
+
+  /**
+   * Get embedding count
+   */
+  getEmbeddingCount(): number {
+    const vectorStore = getVectorStore();
+    return vectorStore.count();
   }
 
   // ===========================================

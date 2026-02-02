@@ -42,6 +42,9 @@ export type { SetupStep, SetupState } from './setup-wizard.js';
 // Memory Store
 export { MemoryStore, getMemoryStore } from './memory/memory-store.js';
 
+// Vector Store
+export { VectorStore, getVectorStore, resetVectorStore, EmbeddingGenerator } from './memory/vector-store.js';
+
 // Context Indexer
 export { ContextIndexer, getContextIndexer } from './context/context-indexer.js';
 export type { FileIndex, ProjectFingerprint } from './context/context-indexer.js';
@@ -54,6 +57,25 @@ export { AgentOrchestrator, getOrchestrator } from './agents/agent-orchestrator.
 
 // Git Automation
 export { GitAutomation, getGitAutomation } from './git/git-automation.js';
+
+// Scheduler
+export { startScheduledJobs, loadSelfReviewContext, getSelfReviewStatus } from './scheduler.js';
+
+// Test Watcher
+export { TestWatcher, getTestWatcher, resetTestWatcher } from './tests/test-watcher.js';
+export type { TestResult, CoverageData, WatchSession } from './tests/test-watcher.js';
+
+// Notification Router
+export { NotificationRouter, getNotificationRouter, resetNotificationRouter } from './notifications/notification-router.js';
+export type { Notification, NotificationType, NotificationPriority, NotificationPreferences } from './notifications/notification-router.js';
+
+// Code Analyzer
+export { CodeAnalyzer, getCodeAnalyzer, resetCodeAnalyzer } from './analyzer/code-analyzer.js';
+export type { CodeAnalysisReport, ComplexityResult, SecurityResult, DuplicationResult, DependencyResult } from './analyzer/code-analyzer.js';
+
+// Pattern Learner
+export { PatternLearner, getPatternLearner, resetPatternLearner } from './learning/pattern-learner.js';
+export type { LearnedPatterns, NamingConvention, LibraryUsage, CodeStructure, WorkflowPattern } from './learning/pattern-learner.js';
 
 // Types
 export * from './types.js';
