@@ -306,6 +306,121 @@ Shows recent mistakes logged by the AI and how it's learning from them.
 
 ---
 
+## Autonomous AI Commands 🤖
+
+### `/goals`
+List all active goals.
+
+**Shows:** Goal ID, title, progress, status, and target metrics.
+
+**When to use:** See what objectives you've set for the AI to work on.
+
+---
+
+### `/goal <id>`
+View goal details and progress.
+
+**Example:** `/goal goal-123456`
+
+**Shows:**
+- Goal description and requirements
+- Current progress vs target
+- Associated tasks
+- Permissions and strategy
+- Blockers
+
+---
+
+### `/creategoal`
+Create a new goal interactively.
+
+**When to use:** When you want the AI to autonomously work toward an objective.
+
+**Goal Types:**
+- `quality` - Test coverage, complexity reduction
+- `feature` - Implement specific features
+- `maintenance` - Reduce tech debt, update dependencies
+- `learning` - Understand codebase, document patterns
+
+**Strategy Options:**
+- `autonomous` - AI works without asking
+- `supervised` - AI asks for approval
+- `manual` - AI suggests, you execute
+
+---
+
+### `/opportunities`
+List detected improvement opportunities.
+
+**Shows:**
+- Type (refactoring, test_coverage, dependency_update, etc.)
+- Priority and estimated effort
+- Suggested action
+- Whether it can be auto-applied
+
+**When to use:** See what improvements the AI has detected.
+
+---
+
+### `/scan`
+Run opportunity detection scan.
+
+**When to use:** After making significant changes to find new improvement opportunities.
+
+---
+
+### `/autonomous <on/off>`
+Toggle autonomous mode.
+
+**Examples:**
+```
+/autonomous on   → Enable autonomous actions
+/autonomous off  → Disable autonomous actions
+```
+
+**When to use:** When you want the AI to take initiative vs only respond to commands.
+
+---
+
+### `/decisions`
+View recent autonomous decisions.
+
+**Shows:**
+- Decision ID and type
+- What was decided and why
+- Approval status
+- Outcome
+
+**When to use:** Review what autonomous decisions the AI has made.
+
+---
+
+### `/transparency`
+View autonomous action log.
+
+**Shows:**
+- All autonomous actions taken
+- Approval status
+- Changes made
+- Outcomes
+
+**When to use:** Get full visibility into autonomous AI activity.
+
+---
+
+### `/approvals`
+View pending approval requests.
+
+**Shows:**
+- Actions requiring approval
+- Risk level
+- Description and reasoning
+- Files affected
+
+**When to use:** Review and approve/deny autonomous actions.
+
+---
+
 ## Typical Workflows
 
 ### Starting a New Project
@@ -345,6 +460,25 @@ Shows recent mistakes logged by the AI and how it's learning from them.
 /recall <topic>      → Find what you remembered
 ```
 
+### Autonomous Development
+```
+1. /creategoal (define an objective)
+2. /autonomous on (enable autonomous mode)
+3. /opportunities (see what can be improved)
+4. /approvals (review and approve actions)
+5. /transparency (review what was done)
+```
+
+### Setting Up Autonomous Goals
+```
+1. /creategoal
+2. Choose type (quality/feature/maintenance/learning)
+3. Set target metrics
+4. Choose strategy (autonomous/supervised/manual)
+5. Configure permissions
+6. AI works toward goal automatically
+```
+
 ---
 
 ## Command Reference Summary
@@ -358,6 +492,7 @@ Shows recent mistakes logged by the AI and how it's learning from them.
 | **Git** | `/git commit`, `/git status`, `/git log`, `/git pr` |
 | **Info** | `/metrics`, `/profile`, `/schedule`, `/schedules` |
 | **Self-Improvement** | `/heartbeat`, `/briefing`, `/checks`, `/selfreview` |
+| **Autonomous AI** | `/goals`, `/goal`, `/creategoal`, `/opportunities`, `/scan`, `/autonomous`, `/decisions`, `/transparency`, `/approvals` |
 
 ---
 
@@ -368,6 +503,11 @@ Shows recent mistakes logged by the AI and how it's learning from them.
 3. **Use `--bg`** with `/task` for long-running operations
 4. **Use `/agent scout`** to explore unfamiliar codebases
 5. **Use `/git commit`** for smart, descriptive commit messages
+6. **Enable `/autonomous on`** to let the AI take initiative on improvements
+7. **Set goals with `/creategoal`** to guide autonomous work
+8. **Check `/approvals`** regularly to review autonomous actions
+9. **Use `/scan`** after major changes to find improvement opportunities
+10. **Review `/transparency`** to see all autonomous AI activity
 
 ---
 

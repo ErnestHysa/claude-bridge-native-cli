@@ -38,6 +38,22 @@ This project has evolved into a sophisticated AI development assistant with a co
 - **Session Persistence**: All sessions survive restarts with full state restoration
 - **Self-Improvement System**: Continuous learning from interactions and outcomes
 
+### Autonomous AI Systems
+
+- **Intention Engine**: Converts events, patterns, and context into actionable intentions
+- **Decision Maker**: Evaluates intentions and makes autonomous decisions based on goals and permissions
+- **Approval Workflow**: Interactive approval system with Telegram inline buttons for autonomous actions
+- **Feature Workflow**: End-to-end feature implementation automation from specification to PR
+- **Context Tracker**: Real-time project state monitoring with health scores and trends
+- **Goal System**: User-defined objectives with progress tracking and autonomous execution
+- **Opportunity Detector**: Continuous scanning for improvements (refactoring, tests, dependencies)
+- **Test Healer**: Self-healing system for automatic test failure detection and fixing
+- **Dependency Manager**: Automated dependency updates with security and compatibility checks
+- **Refactoring Agent**: Autonomous code refactoring with quality gates and rollback capability
+- **Transparency Tracker**: Complete audit trail for all autonomous AI actions
+- **Permission Manager**: Fine-grained permission system for autonomous operations
+- **Rollback Manager**: Automatic rollback capability for failed autonomous changes
+
 ### Autonomous AI Vision
 
 The brain system is designed to evolve into a fully autonomous AI assistant that can:
@@ -144,6 +160,17 @@ npm run lint         # Lint code
 - `/checks` - Run proactive checks
 - `/selfreview` - View learning log from self-improvement system
 
+#### Autonomous AI Commands
+- `/goals` - List all active goals
+- `/goal <id>` - View goal details and progress
+- `/creategoal` - Create a new goal
+- `/opportunities` - List detected improvement opportunities
+- `/scan` - Run opportunity detection scan
+- `/autonomous <on/off>` - Toggle autonomous mode
+- `/decisions` - View recent autonomous decisions
+- `/transparency` - View autonomous action log
+- `/approvals` - View pending approval requests
+
 ### Workflow
 
 1. Use `/start` to initialize your session (first-time users will go through setup wizard)
@@ -193,6 +220,15 @@ npm run lint         # Lint code
 /semantic <query>    → Semantic search through memory
 ```
 
+**Autonomous Development:**
+```
+1. /creategoal (define an objective)
+2. /autonomous on (enable autonomous mode)
+3. /opportunities (see what can be improved)
+4. /approvals (review and approve actions)
+5. /transparency (review what was done)
+```
+
 ## Configuration
 
 | Setting | Default | Description |
@@ -233,7 +269,21 @@ brain/
 ├── analyzer/              # Code analysis tools and results
 ├── scripts/               # Background workers and automation
 ├── errors/                # Error tracking and analysis
-└── *.md                   # Various documentation and plans
+├── approval/              # Approval workflow system
+├── briefing/              # Morning briefing system
+├── context-tracker/       # Real-time project state monitoring
+├── decision/              # Autonomous decision making
+├── dependency/            # Dependency management
+├── feature/               # Feature workflow automation
+├── feedback/              # User feedback collection
+├── goals/                 # Goal system and tracking
+├── intention/             # Intention engine
+├── opportunity/           # Opportunity detection
+├── permission/            # Permission management
+├── refactoring/           # Autonomous refactoring
+├── rollback/              # Rollback management
+├── self-healing/          # Test healing system
+└── transparency/          # Action audit trail
 ```
 
 ### Agent Types
@@ -427,11 +477,26 @@ await identity.updatePersonality({
 - [x] Pattern learning system
 - [x] Notification routing with priorities
 - [x] Background workers and automation
+- [x] Intention engine for autonomous actions
+- [x] Decision maker for evaluating intentions
+- [x] Approval workflow with interactive approvals
+- [x] Feature workflow for end-to-end automation
+- [x] Context tracker for project health monitoring
+- [x] Goal system for objective tracking
+- [x] Opportunity detector for continuous improvement
+- [x] Test healer for self-healing tests
+- [x] Dependency manager for automated updates
+- [x] Refactoring agent for autonomous refactoring
+- [x] Transparency tracker for audit trails
+- [x] Permission manager for fine-grained control
+- [x] Rollback manager for safe autonomous changes
 
 ### In Progress 🚧
 - [ ] Enhanced autonomous AI capabilities
 - [ ] Self-healing test failure recovery
 - [ ] Proactive dependency management
+- [ ] Goal-driven autonomous development
+- [ ] Feature workflow automation
 
 ### Planned 📋
 - [ ] Multi-user support with isolated brain instances
@@ -466,6 +531,10 @@ What makes this project unique:
 6. **Continuous Learning**: Improves from every interaction through pattern learning
 7. **Project Awareness**: Understands codebase structure through intelligent indexing
 8. **Mobile Development**: Full Claude Code capabilities from your mobile device via Telegram
+9. **Goal-Driven Development**: Define high-level objectives and let AI work toward them autonomously
+10. **Self-Healing**: Automatically detects and fixes test failures
+11. **Complete Transparency**: Full audit trail of all autonomous actions with approval workflow
+12. **Continuous Improvement**: Scans for opportunities to improve code quality, test coverage, and dependencies
 
 ## License
 
