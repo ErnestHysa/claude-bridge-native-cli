@@ -8,7 +8,7 @@ import { SessionManager } from "./session-manager.js";
 import { ProjectManager } from "./project-manager-class.js";
 import { ClaudeSpawner } from "./claude-spawner-class.js";
 import type { BridgeConfig } from "./types.js";
-import { escapeHtml, chunkMessage, formatRelativeTime, Logger, sanitizePath } from "./utils.js";
+import { escapeHtml, chunkMessage, formatRelativeTime, Logger, sanitizePath, generateId } from "./utils.js";
 import {
   getBrain,
   getMemoryStore,
@@ -17,8 +17,20 @@ import {
   getContextIndexer,
   getOrchestrator,
   getTaskQueue,
+  startScheduledJobs,
+  loadSelfReviewContext,
+  getTestWatcher,
+  getNotificationRouter,
+  getCodeAnalyzer,
+  getPatternLearner,
   type SetupWizard,
+  type AgentType,
+  type NotificationType,
 } from "./brain/index.js";
+
+// Worker imports for self-improvement system
+import { runHeartbeat, runProactiveChecksWorker } from "./brain/scripts/worker-manager.js";
+import { getHeartbeatStatus } from "./brain/scripts/heartbeat-worker.js";
 
 // Brain system initialization
 let brainInitialized = false;
@@ -108,8 +120,13 @@ export class TelegramBotHandler {
     this.config = config;
     this.logger = new Logger(config.logLevel);
 
+    // Get brain sessions directory
+    const brain = getBrain();
+    const sessionsDir = brain.getSessionsDir();
+
     this.sessionManager = new SessionManager({
       maxConcurrentSessions: config.maxConcurrentSessions,
+      sessionsDir,
     });
 
     this.projectManager = new ProjectManager(config.projectsBase);
@@ -146,6 +163,16 @@ export class TelegramBotHandler {
       { command: "profile", description: "View your profile" },
       { command: "schedule", description: "Schedule a task with cron" },
       { command: "schedules", description: "List scheduled tasks" },
+      { command: "watch", description: "Watch project for test failures" },
+      { command: "notifications", description: "Manage notification preferences" },
+      { command: "analyze", description: "Analyze code quality" },
+      { command: "learn", description: "Learn code patterns" },
+      // Self-improvement commands
+      { command: "heartbeat", description: "Run heartbeat check manually" },
+      { command: "semantic", description: "Semantic memory search" },
+      { command: "briefing", description: "Generate daily briefing" },
+      { command: "checks", description: "Run proactive checks" },
+      { command: "selfreview", description: "View learning log" },
     ]).catch((err) => {
       this.logger.error("Failed to set bot commands", {
         error: err instanceof Error ? err.message : String(err),
@@ -192,11 +219,44 @@ export class TelegramBotHandler {
       this.handleGit(msg, match?.[1])
     );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
-    this.bot.onText(/\/profile/, (msg) => this.handleProfile(msg));
+    this.bot.onText(/\/profile(?:\s+(.+))?/, (msg, match) =>
+      this.handleProfile(msg, match?.[1])
+    );
     this.bot.onText(/\/schedule(?:\s+(.+))?/, (msg) =>
       this.handleSchedule(msg)
     );
     this.bot.onText(/\/schedules/, (msg) => this.handleSchedules(msg));
+
+    // Test watcher command
+    this.bot.onText(/\/watch(?:\s+(.+))?/, (msg, match) =>
+      this.handleWatch(msg, match?.[1])
+    );
+
+    // Notification settings command
+    this.bot.onText(/\/notifications(?:\s+(.+))?/, (msg, match) =>
+      this.handleNotifications(msg, match?.[1])
+    );
+
+    // Code analysis command
+    this.bot.onText(/\/analyze(?:\s+(.+))?/, (msg, match) =>
+      this.handleAnalyze(msg, match?.[1])
+    );
+
+    // Pattern learning command
+    this.bot.onText(/\/learn(?:\s+(.+))?/, (msg, match) =>
+      this.handleLearn(msg, match?.[1])
+    );
+
+    // Self-improvement commands
+    this.bot.onText(/\/heartbeat/, (msg) => this.handleHeartbeat(msg));
+    this.bot.onText(/\/briefing/, (msg) => this.handleBriefing(msg));
+    this.bot.onText(/\/checks/, (msg) => this.handleChecks(msg));
+    this.bot.onText(/\/selfreview/, (msg) => this.handleSelfReview(msg));
+
+    // Semantic search command
+    this.bot.onText(/\/semantic(?:\s+(.+))?$/, (msg, match) =>
+      this.handleSemanticSearch(msg, match?.[1])
+    );
 
     // Context indexer commands
     this.bot.onText(/^\/index(?:\s+(.+))?$/, (msg, match) =>
@@ -371,6 +431,7 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 <b>Brain Commands 🧠</b>
 /remember &lt;key&gt; &lt;value&gt; - Store something in memory
 /recall &lt;query&gt; - Search stored memories
+/semantic &lt;query&gt; - Semantic memory search
 /context - View project context and decisions
 /index &lt;path&gt; - Index project for context awareness
 /search &lt;query&gt; - Search indexed code
@@ -386,6 +447,16 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 /profile - View your profile
 /schedule &lt;cron&gt; &lt;task&gt; - Schedule a task
 /schedules - List scheduled tasks
+
+<b>Code Intelligence 🧠</b>
+/analyze - Analyze code quality
+/learn - Learn code patterns from project
+
+<b>Self-Improvement 🔄</b>
+/heartbeat - Run heartbeat check manually
+/briefing - Generate daily briefing
+/checks - Run proactive checks
+/selfreview - View learning log
 
 <b>Workflow:</b>
 1. Select a project using /select
@@ -577,8 +648,7 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     const detectionResult = this.projectManager.rescan();
 
     await this.bot.editMessageText(
-      `Scan complete. Found ${detectionResult.projects.length} project${
-        detectionResult.projects.length === 1 ? "" : "s"
+      `Scan complete. Found ${detectionResult.projects.length} project${detectionResult.projects.length === 1 ? "" : "s"
       } in ${escapeHtml(detectionResult.scanPath)}`,
       {
         chat_id: chatId,
@@ -704,9 +774,17 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     // Store in brain memory
     await getBrain().remember(key, value);
 
+    // Also store in vector store for semantic search
+    const memory = getMemoryStore();
+    await memory.storeEmbedding(
+      `remember-${key}-${Date.now()}`,
+      `${key}: ${value}`,
+      { type: 'remember', key, chatId }
+    );
+
     await this.bot.sendMessage(
       chatId,
-      `${getBrain().getEmoji()} Remembered: <b>${escapeHtml(key)}</b> = <code>${escapeHtml(value)}</code>`,
+      `${getBrain().getEmoji()} Remembered: <b>${escapeHtml(key)}</b> = <code>${escapeHtml(value)}</code>\n\n💾 Stored in semantic memory - use /semantic to search later.`,
       { parse_mode: "HTML" }
     );
   }
@@ -913,23 +991,128 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     if (!task) {
       await this.bot.sendMessage(
         chatId,
-        `Usage: /agent ${agentType} <task description>`
+        `Usage: /agent ${agentType} <task description>\n\nExample: /agent scout "explore the authentication system"\n\nNote: Builder will write code using Claude CLI (can take a long time)\nReviewer will analyze code for issues\nTester will run your test suite\nDeployer will build and prepare for deployment`
+      );
+      return;
+    }
+
+    const session = this.sessionManager.getSession(chatId);
+    if (!session?.currentProject) {
+      await this.bot.sendMessage(
+        chatId,
+        `No project selected. Use /select first.`
       );
       return;
     }
 
     await this.bot.sendMessage(
       chatId,
-      `${getBrain().getEmoji()} Starting <b>${escapeHtml(agentType)}</b> agent: ${escapeHtml(task)}...`,
+      `${getBrain().getEmoji()} Starting <b>${escapeHtml(agentType)}</b> agent: ${escapeHtml(task)}...\n\n🕐 This may take a while...`,
       { parse_mode: "HTML" }
     );
 
-    // TODO: Actually execute the agent
-    // For now, just acknowledge
-    await this.bot.sendMessage(
-      chatId,
-      `Agent execution will be implemented. Task queued.`
-    );
+    // Execute the agent
+    try {
+      const orchestrator = getOrchestrator();
+
+      // Get the appropriate agent
+      const agents = orchestrator.getAgentsByType(agentType as AgentType);
+      if (!agents || agents.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ No ${agentType} agent available.`
+        );
+        return;
+      }
+
+      // Create and execute workflow - orchestrate() waits for completion
+      const workflow = await orchestrator.orchestrate({
+        name: `${agentType} task: ${task.substring(0, 50)}`,
+        description: task,
+        tasks: [{
+          agentId: agents[0].id,
+          taskId: generateId(),
+          dependencies: [],
+          status: 'pending' as const,
+          result: { projectPath: session.currentProject.path, task },
+        }],
+      });
+
+      // Get the result from the completed workflow
+      const finalTask = workflow.tasks[0];
+      if (!finalTask) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ No task result found.`
+        );
+        return;
+      }
+
+      const result = finalTask.result as { status: string; findings?: unknown; output?: string; error?: string; summary?: string; duration?: number; environment?: string; steps?: unknown };
+
+      if (finalTask.status === 'failed' || result.error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ Agent failed: ${escapeHtml(result.error || 'Unknown error')}`
+        );
+        return;
+      }
+
+      // Format response based on agent type
+      let response = `✅ <b>${escapeHtml(agentType)} Agent Complete</b>\n\n`;
+
+      if (agentType === 'scout' && result.findings) {
+        const findings = result.findings as { files: number; functions: number; classes: number; tests: number; patterns: string[]; queryResults?: string[] };
+        response += `📁 <b>Project Analysis</b>\n`;
+        response += `Files: ${findings.files}\n`;
+        response += `Functions: ${findings.functions}\n`;
+        response += `Classes: ${findings.classes}\n`;
+        response += `Tests: ${findings.tests}\n`;
+        if (findings.patterns.length > 0) {
+          response += `\n<b>Patterns:</b> ${findings.patterns.slice(0, 3).join(', ')}\n`;
+        }
+        if (findings.queryResults && findings.queryResults.length > 0) {
+          response += `\n<b>Query Results:</b>\n${findings.queryResults.join('\n')}\n`;
+        }
+      } else if (agentType === 'builder' && result.output) {
+        response += `📝 <b>Code Changes Made</b>\n\n`;
+        response += `<pre>${escapeHtml(result.output)}</pre>\n`;
+        response += `\n⏱️ Duration: ${Math.round((result.duration as number) / 1000)}s`;
+      } else if (agentType === 'reviewer' && result.findings) {
+        const findings = result.findings as { summary: string; issues: Array<{ type: string; message: string }> };
+        response += `🔍 <b>Code Review Results</b>\n\n`;
+        response += `${findings.summary}\n`;
+        if (findings.issues.length > 0 && findings.issues.length <= 10) {
+          response += `\n<b>Issues Found:</b>\n`;
+          for (const issue of findings.issues) {
+            response += `• [${issue.type}] ${escapeHtml(issue.message)}\n`;
+          }
+        }
+      } else if (agentType === 'tester') {
+        response += `🧪 <b>Test Results</b>\n\n`;
+        response += `${result.summary}\n`;
+        if (result.output) {
+          response += `\n<pre>${escapeHtml(result.output)}</pre>\n`;
+        }
+      } else if (agentType === 'deployer') {
+        const deployResult = result as { environment: string; steps: Array<{ step: string; status: string; output?: string }> };
+        response += `🚀 <b>Deployment</b>\n\n`;
+        response += `Environment: ${deployResult.environment}\n\n`;
+        for (const step of deployResult.steps) {
+          const icon = step.status === 'complete' ? '✅' : step.status === 'failed' ? '❌' : '⏭️';
+          response += `${icon} ${step.step}: ${step.output || step.status}\n`;
+        }
+      } else {
+        response += JSON.stringify(result, null, 2);
+      }
+
+      await this.bot.sendMessage(chatId, response, { parse_mode: 'HTML' });
+    } catch (error) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Agent execution failed: ${escapeHtml(error instanceof Error ? error.message : String(error))}`
+      );
+    }
   }
 
   /**
@@ -1019,9 +1202,9 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
   }
 
   /**
-   * Handle /profile command - View user profile
+   * Handle /profile command - View/edit user profile
    */
-  private async handleProfile(msg: Message): Promise<void> {
+  private async handleProfile(msg: Message, args?: string): Promise<void> {
     if (!this.isAuthorized(msg)) {
       return this.sendNotAuthorized(msg);
     }
@@ -1029,6 +1212,20 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     await ensureBrainInitialized();
     const chatId = msg.chat.id;
     const brain = getBrain();
+    const identityManager = getIdentityManager();
+
+    // Handle setting location
+    if (args) {
+      const parts = args.split(' ');
+      if (parts[0] === 'location' && parts.length > 1) {
+        const location = parts.slice(1).join(' ');
+        const preferences = identityManager.getPreferences();
+        preferences.user.location = location;
+        await identityManager.updatePreferences(preferences);
+        await this.bot.sendMessage(chatId, `✅ Location updated to: ${escapeHtml(location)}`);
+        return;
+      }
+    }
 
     const identity = brain.getIdentity();
     const personality = brain.getPersonality();
@@ -1037,7 +1234,8 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     let response = `${identity.emoji} <b>Profile</b>\n\n`;
     response += `<b>Bot Name:</b> ${escapeHtml(identity.name)} ${identity.emoji}\n`;
     response += `<b>User:</b> ${escapeHtml(brain.getUserName())}\n`;
-    response += `<b>Timezone:</b> ${escapeHtml(brain.getTimezone())}\n\n`;
+    response += `<b>Timezone:</b> ${escapeHtml(brain.getTimezone())}\n`;
+    response += `<b>Location:</b> ${escapeHtml(preferences.user?.location || 'Not set (default: Kos,Greece)')}\n\n`;
 
     response += `<b>Communication:</b>\n`;
     response += `• Style: ${escapeHtml(personality.communication.style)}\n`;
@@ -1047,7 +1245,11 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 
     response += `<b>Git:</b>\n`;
     response += `• Default branch: ${escapeHtml(preferences.git.defaultBranch)}\n`;
-    response += `• Commit style: ${escapeHtml(preferences.git.commitMessageStyle)}`;
+    response += `• Commit style: ${escapeHtml(preferences.git.commitMessageStyle)}\n\n`;
+
+    response += `<b>Set Location:</b>\n`;
+    response += `• Use: /profile location &lt;city,country&gt;\n`;
+    response += `• Example: /profile location New York,USA`;
 
     await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
   }
@@ -1104,8 +1306,8 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       await this.bot.sendMessage(
         chatId,
         "Usage: /schedule \"<cron>\" <task>\n" +
-          "Example: /schedule \"0 2 * * *\" Run nightly backup\n" +
-          "Cron format: minute hour day month weekday"
+        "Example: /schedule \"0 2 * * *\" Run nightly backup\n" +
+        "Cron format: minute hour day month weekday"
       );
       return;
     }
@@ -1165,6 +1367,697 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       await this.bot.sendMessage(
         chatId,
         `❌ Failed to list schedules: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Handle /watch command - Watch project for test failures
+   * Usage: /watch <start|stop|status> [project]
+   */
+  private async handleWatch(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const session = this.sessionManager.getSession(chatId);
+
+    if (!args) {
+      await this.bot.sendMessage(
+        chatId,
+        `Usage: /watch <start|stop|status>\n\n• <b>start</b> - Start watching current project\n• <b>stop</b> - Stop watching\n• <b>status</b> - Show watch status`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    const parts = args.trim().split(/\s+/);
+    const action = parts[0].toLowerCase();
+
+    const testWatcher = getTestWatcher();
+    await testWatcher.initialize();
+
+    if (action === "start") {
+      if (!session?.currentProject) {
+        await this.bot.sendMessage(chatId, "No project selected. Use /select first.");
+        return;
+      }
+
+      try {
+        await testWatcher.startWatcher(
+          session.currentProject.path,
+          session.currentProject.name,
+          chatId
+        );
+
+        await this.bot.sendMessage(
+          chatId,
+          `👀 Now watching <b>${escapeHtml(session.currentProject.name)}</b> for test failures.\n\nTests will run automatically when files change.`,
+          { parse_mode: "HTML" }
+        );
+      } catch (error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ Failed to start watcher: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    } else if (action === "stop") {
+      if (!session?.currentProject) {
+        await this.bot.sendMessage(chatId, "No project selected.");
+        return;
+      }
+
+      const stopped = await testWatcher.stopWatcher(session.currentProject.path, chatId);
+
+      if (stopped) {
+        await this.bot.sendMessage(
+          chatId,
+          `⏹️ Stopped watching <b>${escapeHtml(session.currentProject.name)}</b>`,
+          { parse_mode: "HTML" }
+        );
+      } else {
+        await this.bot.sendMessage(chatId, "No active watcher for this project.");
+      }
+    } else if (action === "status") {
+      const watchers = testWatcher.getWatchersForChat(chatId);
+
+      if (watchers.length === 0) {
+        await this.bot.sendMessage(chatId, "No active watchers.");
+        return;
+      }
+
+      let response = `👀 <b>Active Watchers (${watchers.length}):</b>\n\n`;
+
+      for (const watcher of watchers) {
+        const lastRun = watcher.lastRunAt
+          ? `Last run: ${formatRelativeTime(Date.now() - watcher.lastRunAt)} ago`
+          : "Not run yet";
+
+        let resultInfo = "";
+        if (watcher.lastResult) {
+          const r = watcher.lastResult;
+          resultInfo = `\nResult: ✅ ${r.passed} passed, ❌ ${r.failed} failed (${Math.round(r.duration / 1000)}s)`;
+        }
+
+        response += `• <b>${escapeHtml(watcher.projectName)}</b>\n`;
+        response += `  Status: ${watcher.status}\n`;
+        response += `  ${lastRun}${resultInfo}\n\n`;
+      }
+
+      await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+    } else {
+      await this.bot.sendMessage(
+        chatId,
+        `Unknown action: <b>${escapeHtml(action)}</b>\n\nUse: start, stop, or status`,
+        { parse_mode: "HTML" }
+      );
+    }
+  }
+
+  /**
+   * Handle /notifications command - Manage notification preferences
+   * Usage: /notifications <status|enable|disable|digest|types|quiet>
+   */
+  private async handleNotifications(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const router = getNotificationRouter();
+    await router.initialize();
+
+    if (!args) {
+      const prefs = router.getPreferences(chatId);
+      const types = prefs.types;
+
+      let response = `🔔 <b>Notification Settings</b>\n\n`;
+      response += `Status: ${prefs.enabled ? '✅ Enabled' : '❌ Disabled'}\n\n`;
+
+      response += `<b>Notification Types:</b>\n`;
+      for (const [type, enabled] of Object.entries(types)) {
+        response += `  ${enabled ? '✅' : '❌'} ${type}\n`;
+      }
+
+      if (prefs.quietHoursStart !== undefined) {
+        response += `\n<b>Quiet Hours:</b> ${prefs.quietHoursStart}:00 - ${prefs.quietHoursEnd}:00\n`;
+      }
+
+      if (prefs.minimumImmediatePriority) {
+        response += `<b>Min Priority:</b> ${prefs.minimumImmediatePriority}\n`;
+      }
+
+      response += `\n<b>Digest:</b> ${prefs.digestEnabled ? '✅ Every ' + prefs.digestInterval + ' min' : '❌ Disabled'}\n`;
+
+      response += `\n<b>Actions:</b>\n`;
+      response += `/notifications enable|disable - Toggle notifications\n`;
+      response += `/notifications types - Toggle specific types\n`;
+      response += `/notifications digest <min> - Set digest interval\n`;
+      response += `/notifications quiet <start> <end> - Set quiet hours`;
+
+      await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+      return;
+    }
+
+    const parts = args.trim().split(/\s+/);
+    const action = parts[0].toLowerCase();
+
+    if (action === "enable") {
+      const prefs = router.getPreferences(chatId);
+      prefs.enabled = true;
+      await router.setPreferences(prefs);
+      await this.bot.sendMessage(chatId, "✅ Notifications enabled");
+    } else if (action === "disable") {
+      const prefs = router.getPreferences(chatId);
+      prefs.enabled = false;
+      await router.setPreferences(prefs);
+      await this.bot.sendMessage(chatId, "❌ Notifications disabled");
+    } else if (action === "types") {
+      if (parts.length < 3) {
+        await this.bot.sendMessage(
+          chatId,
+          `Usage: /notifications types <type> <on|off>\n\nTypes: error, security, deployment, test, lint, info, success`
+        );
+        return;
+      }
+
+      const type = parts[1] as NotificationType;
+      const enabled = parts[2].toLowerCase() === "on" || parts[2].toLowerCase() === "enable";
+
+      const validTypes: NotificationType[] = ['error', 'security', 'deployment', 'test', 'lint', 'info', 'success'];
+
+      if (!validTypes.includes(type)) {
+        await this.bot.sendMessage(chatId, `❌ Invalid type. Valid types: ${validTypes.join(', ')}`);
+        return;
+      }
+
+      await router.setNotificationType(chatId, type, enabled);
+      await this.bot.sendMessage(chatId, `✅ ${type} notifications ${enabled ? 'enabled' : 'disabled'}`);
+    } else if (action === "digest") {
+      if (parts.length < 2) {
+        await this.bot.sendMessage(chatId, "Usage: /notifications digest <minutes>");
+        return;
+      }
+
+      const interval = parseInt(parts[1], 10);
+      if (isNaN(interval) || interval < 5 || interval > 1440) {
+        await this.bot.sendMessage(chatId, "❌ Invalid interval. Use 5-1440 minutes");
+        return;
+      }
+
+      const prefs = router.getPreferences(chatId);
+      prefs.digestEnabled = true;
+      prefs.digestInterval = interval;
+      await router.setPreferences(prefs);
+      await this.bot.sendMessage(chatId, `✅ Digest interval set to ${interval} minutes`);
+    } else if (action === "quiet") {
+      if (parts.length < 3) {
+        await this.bot.sendMessage(chatId, "Usage: /notifications quiet <start_hour> <end_hour>\nExample: /notifications quiet 22 7");
+        return;
+      }
+
+      const start = parseInt(parts[1], 10);
+      const end = parseInt(parts[2], 10);
+
+      if (isNaN(start) || isNaN(end) || start < 0 || start > 23 || end < 0 || end > 23) {
+        await this.bot.sendMessage(chatId, "❌ Invalid hours. Use 0-23");
+        return;
+      }
+
+      await router.setQuietHours(chatId, start, end);
+      await this.bot.sendMessage(chatId, `✅ Quiet hours set to ${start}:00 - ${end}:00`);
+    } else {
+      await this.bot.sendMessage(
+        chatId,
+        `Unknown action: <b>${escapeHtml(action)}</b>\n\nUse: status, enable, disable, types, digest, quiet`,
+        { parse_mode: "HTML" }
+      );
+    }
+  }
+
+  /**
+   * Handle /analyze command - Analyze code quality
+   * Usage: /analyze [complexity|security|duplication|dependencies|all]
+   */
+  private async handleAnalyze(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const session = this.sessionManager.getSession(chatId);
+
+    if (!session?.currentProject) {
+      await this.bot.sendMessage(chatId, "No project selected. Use /select first.");
+      return;
+    }
+
+    const analysisType = args?.toLowerCase() || 'summary';
+
+    await this.bot.sendMessage(
+      chatId,
+      `🔍 Analyzing <b>${escapeHtml(session.currentProject.name)}</b> for ${escapeHtml(analysisType)}...\n\nThis may take a moment...`,
+      { parse_mode: "HTML" }
+    );
+
+    try {
+      const analyzer = getCodeAnalyzer();
+      const report = await analyzer.analyzeProject(session.currentProject.path);
+
+      let response = `📊 <b>Code Analysis Report</b>\n\n`;
+      response += `<b>Project:</b> ${escapeHtml(session.currentProject.name)}\n`;
+      response += `<b>Analyzed:</b> ${report.summary.totalFiles} files\n\n`;
+
+      // Summary section
+      response += `<b>Summary:</b>\n`;
+      response += `• High complexity files: ${report.summary.highComplexityFiles}\n`;
+      response += `• Security issues: ${report.summary.securityIssues}\n`;
+      response += `• Critical security: ${report.summary.criticalSecurityIssues}\n`;
+      response += `• Duplication rate: ${report.summary.duplicationRate.toFixed(1)}%\n\n`;
+
+      // Type-specific details
+      if (analysisType === 'all' || analysisType === 'complexity') {
+        response += `<b>Complexity Analysis:</b>\n`;
+        const highComplexityFiles = report.complexity.filter(c => c.rating === 'high' || c.rating === 'very-high').slice(0, 5);
+        for (const file of highComplexityFiles) {
+          response += `• ${escapeHtml(file.file)}: ${file.complexity.toFixed(1)} avg (${file.rating})\n`;
+        }
+        if (report.complexity.length > 5) {
+          response += `  ... and ${report.complexity.length - 5} more\n`;
+        }
+        response += '\n';
+      }
+
+      if (analysisType === 'all' || analysisType === 'security') {
+        response += `<b>Security Issues:</b>\n`;
+        for (const file of report.security.slice(0, 5)) {
+          const critical = file.issues.filter(i => i.severity === 'critical').length;
+          const high = file.issues.filter(i => i.severity === 'high').length;
+          response += `• ${escapeHtml(file.file)}: ${file.issues.length} issues (Critical: ${critical}, High: ${high})\n`;
+        }
+        if (report.security.length > 5) {
+          response += `  ... and ${report.security.length - 5} more files\n`;
+        }
+        if (report.security.length === 0) {
+          response += `No security issues found!\n`;
+        }
+        response += '\n';
+      }
+
+      if (analysisType === 'all' || analysisType === 'duplication') {
+        response += `<b>Code Duplication:</b>\n`;
+        response += `• Duplicate lines: ${report.duplication.totalDuplicateLines}\n`;
+        response += `• Duplication rate: ${report.duplication.duplicationPercentage.toFixed(1)}%\n`;
+        if (report.duplication.duplicates.length > 0) {
+          response += `• Found ${report.duplication.duplicates.length} duplicate fragments\n`;
+        }
+        response += '\n';
+      }
+
+      if (analysisType === 'all' || analysisType === 'dependencies') {
+        response += `<b>Dependencies:</b>\n`;
+        response += `• Total: ${report.dependencies.dependencyCount}\n`;
+        response += `• With vulnerabilities: ${report.dependencies.dependencies.filter(d => (d.vulnerabilities || 0) > 0).length}\n`;
+        response += `• Package lock: ${report.dependencies.hasPackageLock ? '✅' : '❌'}\n\n`;
+      }
+
+      // Recommendations
+      if (report.recommendations.length > 0) {
+        response += `<b>Recommendations:</b>\n`;
+        for (const rec of report.recommendations.slice(0, 5)) {
+          response += `• ${escapeHtml(rec)}\n`;
+        }
+        response += '\n';
+      }
+
+      // Send in chunks if too long
+      const messages = chunkMessage(response, 4000);
+      for (const msgChunk of messages) {
+        await this.bot.sendMessage(chatId, msgChunk, { parse_mode: "HTML" });
+      }
+    } catch (error) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Analysis failed: ${escapeHtml(error instanceof Error ? error.message : String(error))}`
+      );
+    }
+  }
+
+  /**
+   * Handle /learn command - Learn code patterns
+   * Usage: /learn [analyze|suggest|show]
+   */
+  private async handleLearn(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const session = this.sessionManager.getSession(chatId);
+
+    if (!session?.currentProject) {
+      await this.bot.sendMessage(chatId, "No project selected. Use /select first.");
+      return;
+    }
+
+    const action = args?.toLowerCase() || 'show';
+
+    const learner = getPatternLearner();
+
+    if (action === 'analyze') {
+      await this.bot.sendMessage(
+        chatId,
+        `🧠 Analyzing <b>${escapeHtml(session.currentProject.name)}</b> for patterns...\n\nThis may take a moment...`,
+        { parse_mode: "HTML" }
+      );
+
+      try {
+        const patterns = await learner.learnPatterns(session.currentProject.path);
+
+        let response = `📚 <b>Learned Patterns</b>\n\n`;
+        response += `<b>Project:</b> ${escapeHtml(session.currentProject.name)}\n`;
+        response += `<b>Analyzed:</b> ${new Date(patterns.lastAnalyzed).toLocaleString()}\n\n`;
+
+        // Naming conventions
+        const uniqueConventions = new Set(Array.from(patterns.namingConventions.values()).map(c => c.type));
+        if (uniqueConventions.size > 0) {
+          response += `<b>Naming Conventions:</b> ${Array.from(uniqueConventions).join(', ')}\n\n`;
+        }
+
+        // Top libraries
+        const topLibs = Array.from(patterns.libraries.values())
+          .sort((a, b) => b.importCount - a.importCount)
+          .slice(0, 10);
+
+        if (topLibs.length > 0) {
+          response += `<b>Top Libraries:</b>\n`;
+          for (const lib of topLibs) {
+            response += `• ${escapeHtml(lib.name)} (${lib.importCount} imports)\n`;
+          }
+          response += '\n';
+        }
+
+        // Code structures
+        if (patterns.structures.length > 0) {
+          response += `<b>Code Structures:</b>\n`;
+          const uniqueStructures = patterns.structures.slice(0, 8);
+          for (const struct of uniqueStructures) {
+            response += `• ${escapeHtml(struct.description)}\n`;
+          }
+          response += '\n';
+        }
+
+        // Workflows
+        if (patterns.workflows.length > 0) {
+          response += `<b>Detected Workflows:</b>\n`;
+          for (const wf of patterns.workflows) {
+            response += `• ${escapeHtml(wf.name)}: ${escapeHtml(wf.description)} (${Math.round(wf.confidence * 100)}% confidence)\n`;
+          }
+        }
+
+        await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+      } catch (error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ Learning failed: ${escapeHtml(error instanceof Error ? error.message : String(error))}`
+        );
+      }
+    } else if (action === 'suggest') {
+      try {
+        const suggestion = await learner.generateCodeSuggestion(session.currentProject.path, 'general');
+
+        await this.bot.sendMessage(
+          chatId,
+          `💡 <b>Code Suggestions for ${escapeHtml(session.currentProject.name)}</b>\n\n<pre>${escapeHtml(suggestion)}</pre>`,
+          { parse_mode: "HTML" }
+        );
+      } catch (error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ Failed to generate suggestions: ${escapeHtml(error instanceof Error ? error.message : String(error))}`
+        );
+      }
+    } else {
+      // Show learned patterns
+      try {
+        const patterns = await learner.getPatterns(session.currentProject.path);
+
+        if (!patterns) {
+          await this.bot.sendMessage(
+            chatId,
+            `No patterns learned yet for <b>${escapeHtml(session.currentProject.name)}</b>.\n\nUse /learn analyze to start learning.`
+          );
+          return;
+        }
+
+        let response = `📚 <b>Stored Patterns</b>\n\n`;
+        response += `<b>Project:</b> ${escapeHtml(session.currentProject.name)}\n`;
+        response += `<b>Last Analyzed:</b> ${formatRelativeTime(Date.now() - patterns.lastAnalyzed)} ago\n\n`;
+
+        // Naming conventions
+        response += `<b>Naming Conventions:</b>\n`;
+        const uniqueConventions = Array.from(patterns.namingConventions.values())
+          .reduce((acc, c) => acc.set(c.type, Math.max(acc.get(c.type) || 0, c.confidence)), new Map());
+
+        for (const [type, confidence] of uniqueConventions) {
+          response += `• ${type} (${confidence} uses)\n`;
+        }
+
+        // Top libraries
+        const topLibs = Array.from(patterns.libraries.values())
+          .sort((a, b) => b.importCount - a.importCount)
+          .slice(0, 5);
+
+        if (topLibs.length > 0) {
+          response += `\n<b>Top Libraries:</b>\n`;
+          for (const lib of topLibs) {
+            response += `• ${escapeHtml(lib.name)}\n`;
+          }
+        }
+
+        response += `\n<b>Actions:</b>\n`;
+        response += `/learn analyze - Re-analyze codebase\n`;
+        response += `/learn suggest - Get code suggestions`;
+
+        await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+      } catch (error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ Failed to load patterns: ${escapeHtml(error instanceof Error ? error.message : String(error))}`
+        );
+      }
+    }
+  }
+
+  /**
+   * Handle /heartbeat command - Run heartbeat check manually
+   */
+  private async handleHeartbeat(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    try {
+      await this.bot.sendMessage(chatId, "💓 Running heartbeat check...");
+
+      const memory = getMemoryStore();
+      const projectsPath = memory.getFactTyped<string>("projects-base") || process.cwd();
+
+      const result = await runHeartbeat(projectsPath);
+
+      if (result.success) {
+        await this.bot.sendMessage(chatId, `✅ ${result.output || "Heartbeat complete - no issues detected"}`);
+      } else {
+        await this.bot.sendMessage(chatId, `⚠️ ${result.output || result.error || "Heartbeat detected issues"}`);
+      }
+    } catch (error) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Heartbeat failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Handle /briefing command - Generate daily briefing
+   */
+  private async handleBriefing(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    try {
+      await this.bot.sendMessage(chatId, "📋 Generating briefing...");
+
+      const identityManager = getIdentityManager();
+      const preferences = identityManager.getPreferences();
+      const location = preferences.user?.location || "Kos,Greece";
+
+      const { generateBriefing, logBriefing } = await import("./brain/scripts/briefing-worker.js");
+      const briefing = await generateBriefing(location);
+
+      if (briefing.success) {
+        // Send in chunks if too long
+        const message = briefing.message;
+        if (message.length > 4000) {
+          const chunks = message.match(/[\s\S]{1,4000}/g) || [];
+          for (const chunk of chunks) {
+            await this.bot.sendMessage(chatId, chunk, { parse_mode: "HTML" });
+          }
+        } else {
+          await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+        }
+
+        // Log to memory
+        await logBriefing(message);
+      } else {
+        await this.bot.sendMessage(chatId, "❌ Failed to generate briefing");
+      }
+    } catch (error) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Briefing failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Handle /checks command - Run proactive checks
+   */
+  private async handleChecks(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    try {
+      await this.bot.sendMessage(chatId, "🔍 Running proactive checks...");
+
+      const memory = getMemoryStore();
+      const projectsPath = memory.getFactTyped<string>("projects-base") || process.cwd();
+
+      const result = await runProactiveChecksWorker(projectsPath);
+
+      if (result.success) {
+        await this.bot.sendMessage(chatId, `✅ ${result.output || "No issues found"}`);
+      } else {
+        await this.bot.sendMessage(chatId, `⚠️ ${result.output || result.error || "Checks completed with alerts"}`);
+      }
+    } catch (error) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Checks failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Handle /self-review command - View learning log
+   */
+  private async handleSelfReview(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    try {
+      const status = await getHeartbeatStatus();
+
+      let response = `📝 Self-Review Learning Log\n\n`;
+
+      if (status.lastRun) {
+        response += `Last Heartbeat: ${status.lastRun}\n`;
+      }
+
+      if (status.needsAttention) {
+        response += `\n⚠️ Attention Required: Recent alerts detected\n`;
+      } else {
+        response += `\n✅ No recent alerts\n`;
+      }
+
+      response += `\nRecent Entries (last 5):\n`;
+
+      if (status.recentEntries.length === 0) {
+        response += `\nNo entries yet. The learning log will populate as the AI identifies patterns and improvements.`;
+      } else {
+        for (const entry of status.recentEntries) {
+          const lines = entry.split("\n").slice(0, 4).join("\n");
+          response += `\n${lines}\n`;
+          if (entry.length > 200) {
+            response += `...\n`;
+          }
+        }
+      }
+
+      // Send without parse_mode to avoid HTML parsing issues with <tags> in entries
+      await this.bot.sendMessage(chatId, response);
+    } catch (error) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Failed to load self-review: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Handle /semantic command - Semantic memory search
+   */
+  private async handleSemanticSearch(msg: Message, query?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const memory = getMemoryStore();
+
+    if (!query) {
+      await this.bot.sendMessage(
+        chatId,
+        `Usage: /semantic <query>\n\nExample: /semantic how do I handle authentication?\n\nThis searches your memory using semantic similarity, finding related content even without exact keyword matches.`
+      );
+      return;
+    }
+
+    try {
+      const results = await memory.semanticSearch(query, 5);
+
+      if (results.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          `🔍 No semantic matches found for "<b>${escapeHtml(query)}</b>"\n\nTip: Use /remember to store more information in memory.`
+        );
+        return;
+      }
+
+      let response = `🔍 <b>Semantic Search: "${escapeHtml(query)}"</b>\n\n`;
+      response += `Found <b>${results.length}</b> similar memories:\n\n`;
+
+      for (const result of results) {
+        const percent = Math.round(result.similarity * 100);
+        response += `<b>[${percent}%]</b> ${escapeHtml(result.text.substring(0, 100))}${result.text.length > 100 ? '...' : ''}\n`;
+        if (result.metadata?.source) {
+          response += `   📁 Source: ${escapeHtml(String(result.metadata.source))}\n`;
+        }
+        response += `\n`;
+      }
+
+      await this.bot.sendMessage(chatId, response, { parse_mode: 'HTML' });
+    } catch (error) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Semantic search failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -1634,6 +2527,20 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       timestamp: Date.now(),
     });
 
+    // Load self-review context for better responses
+    let enhancedPrompt = text;
+    try {
+      const selfReviewContext = await loadSelfReviewContext();
+      if (selfReviewContext) {
+        enhancedPrompt = `${text}\n\n${selfReviewContext}`;
+        this.logger.debug("Loaded self-review context for response");
+      }
+    } catch (error) {
+      this.logger.warn("Failed to load self-review context", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Send typing indicator
     await this.bot.sendChatAction(chatId, "typing");
 
@@ -1676,7 +2583,7 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       // Spawn with streaming callback
       const claudeProcess = this.claudeSpawner.spawnProcess({
         project: session.currentProject,
-        prompt: text,
+        prompt: enhancedPrompt,
         model: this.config.claudeDefaultModel,
         onOutput: (data: string) => {
           streamBuffer += data;
@@ -1772,14 +2679,45 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
   /**
    * Start the bot
    */
-  public start(): void {
+  public async start(): Promise<void> {
     console.log("Bot started successfully!");
+
+    // Load persisted sessions
+    try {
+      const loadedCount = await this.sessionManager.loadSessions();
+      if (loadedCount > 0) {
+        console.log(`Restored ${loadedCount} session(s) from disk.`);
+      }
+    } catch (error) {
+      this.logger.error("Failed to load sessions", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Start self-improvement scheduled jobs
+    try {
+      startScheduledJobs();
+    } catch (error) {
+      this.logger.error("Failed to start scheduled jobs", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
    * Stop the bot
    */
   public async stop(): Promise<void> {
+    // Save all sessions before shutdown
+    try {
+      await this.sessionManager.saveSessions();
+      console.log("Sessions saved.");
+    } catch (error) {
+      this.logger.error("Failed to save sessions", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     this.bot.stopPolling();
     console.log("Bot stopped.");
   }
