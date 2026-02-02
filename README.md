@@ -11,17 +11,40 @@ A Telegram bot that bridges Claude Code CLI with Telegram messaging, allowing yo
 - **File Edit Approval**: Configurable approval for dangerous operations
 - **Graceful Shutdown**: Proper cleanup of active processes
 
-### New Features - Brain System
+## Brain System - AI-Powered Development Assistant
 
-- **Persistent Memory Store**: Store and retrieve facts, decisions, and patterns across sessions
-- **Task Queue**: Create and manage background tasks with priority scheduling
-- **Agent Orchestrator**: Coordinate multiple specialized agents for complex workflows
+This project has evolved into a sophisticated AI development assistant with a comprehensive brain system that provides:
+
+### Core Brain Features
+
+- **Persistent Memory Store**: Store and retrieve facts, decisions, and patterns across sessions with semantic search
+- **Vector Store**: Embedding-based semantic search for context-aware memory retrieval
+- **Multi-Agent System**: Coordinate specialized AI agents (Scout, Builder, Reviewer, Tester, Deployer)
+- **Task Queue**: Create and manage background tasks with priority scheduling and parallel execution
 - **Context Indexer**: Automatically index and understand project structure
-- **Git Automation**: Smart commits and PR management with conventional commits
+- **Git Automation**: Smart commits, PR management, and deployment operations
 - **Identity Management**: Customizable agent personality and user preferences
 - **Setup Wizard**: Interactive first-time setup for personalized experience
 - **Streaming Output**: Real-time Claude responses streamed to Telegram
 - **Flexible Timeout**: Configure Claude process timeout (0 = unlimited)
+
+### Advanced Brain Capabilities
+
+- **Code Analyzer**: Complexity analysis, security scanning, duplication detection
+- **Pattern Learner**: Automatic detection of coding patterns and conventions
+- **Notification Router**: Priority-based notification routing with quiet hours
+- **Background Workers**: Heartbeat monitoring, daily briefings, proactive checks
+- **Project Context Tracking**: Per-project memory and context isolation
+- **Session Persistence**: All sessions survive restarts with full state restoration
+- **Self-Improvement System**: Continuous learning from interactions and outcomes
+
+### Autonomous AI Vision
+
+The brain system is designed to evolve into a fully autonomous AI assistant that can:
+- Initiate actions proactively based on events, time, and patterns
+- Self-heal by fixing test failures and managing dependencies
+- Work toward user-defined goals with transparency
+- Learn from every interaction to improve over time
 
 ## Setup
 
@@ -79,16 +102,47 @@ npm run lint         # Lint code
 - `/cancel` - Cancel current operation
 - `/help` - Show help message
 
-#### Brain System Commands
+#### Memory & Context Commands
 - `/remember <key> <value>` - Store information in persistent memory
 - `/recall <query>` - Search and retrieve from memory
+- `/semantic <query>` - Semantic memory search using embeddings
 - `/context` - View current project context and structure
-- `/task <type> <description>` - Create a background task
+- `/index <path>` - Index project for context awareness
+- `/search <query>` - Search indexed code
+- `/file <path>` - Get detailed info about a specific file
+
+#### Task Management Commands
+- `/task <description> [--bg]` - Create a background task
 - `/tasks` - List all active and queued tasks
-- `/agent <type> <prompt>` - Run a specific agent (orchestrator, scout, builder, reviewer, tester)
+- `/schedule "<cron>" <task>` - Schedule a recurring task
+- `/schedules` - List all scheduled tasks
+
+#### Agent Commands
+- `/agent <type> <prompt>` - Run a specific agent
 - `/agents` - Show running agents and their status
-- `/git <command>` - Git operations (commit, pr, status, log)
+
+**Available Agent Types:**
+- `scout` - Explores codebase, finds patterns, analyzes architecture
+- `builder` - Writes code, implements features, refactors code
+- `reviewer` - Reviews for bugs, security issues, best practices
+- `tester` - Runs tests, analyzes coverage, generates test data
+- `deployer` - Handles deployments, rollbacks, CI/CD operations
+
+#### Git Commands
+- `/git commit` - Smart commit with auto-generated message
+- `/git status` - Show git status
+- `/git log` - Show recent commits
+- `/git pr` - Generate pull request description
+
+#### Information Commands
 - `/metrics` - Show performance metrics and statistics
+- `/profile` - View your profile and preferences
+
+#### Self-Improvement Commands
+- `/heartbeat` - Manually trigger a heartbeat check
+- `/briefing` - Generate the daily briefing
+- `/checks` - Run proactive checks
+- `/selfreview` - View learning log from self-improvement system
 
 ### Workflow
 
@@ -98,13 +152,46 @@ npm run lint         # Lint code
 4. Claude processes and responds with streaming output
 5. File edits may require approval (configurable)
 
-#### Advanced Workflow with Brain System
+#### Advanced Workflows with Brain System
 
-1. **Store Context**: Use `/remember` to store project-specific decisions or patterns
-2. **Create Tasks**: Use `/task` to queue background work (tests, scans, refactors)
-3. **Run Agents**: Use `/agent` to delegate work to specialized agents
-4. **Git Operations**: Use `/git commit` for smart commits or `/git pr` for PR creation
-5. **Review Metrics**: Use `/metrics` to track productivity and system performance
+**Starting a New Project:**
+```
+1. /addproject C:\path\to\project
+2. /select (choose the project)
+3. /index (let it scan the codebase)
+4. Start working: "Help me understand the authentication flow"
+```
+
+**After Making Important Decisions:**
+```
+/remember We implemented JWT with refresh tokens
+/remember Frontend uses React, backend uses FastAPI
+/remember All API responses follow {success, data, error} format
+```
+
+**Before Big Refactors:**
+```
+1. /task Analyze dependencies for refactor --bg
+2. /agent scout Find all uses of the old API
+3. Do the work
+4. /git commit
+```
+
+**Daily Productivity:**
+```
+/status   → See what's active
+/metrics  → See what you accomplished
+/tasks    → Check background tasks
+/briefing → Get daily briefing with weather and activity
+```
+
+**When Stuck:**
+```
+/search <keyword>    → Find related code
+/context             → See what's been decided
+/recall <topic>      → Find what you remembered
+/semantic <query>    → Semantic search through memory
+```
 
 ## Configuration
 
@@ -131,23 +218,42 @@ The brain system stores data in the `./brain` directory with the following struc
 
 ```
 brain/
-├── identity/         # Agent identity and personality
-├── memory/           # Persistent memory store
-├── logs/             # Conversation and activity logs
-├── projects/         # Project-specific context
-└── heartbeats/       # System metrics and health
+├── identity/              # Agent identity, personality, and user preferences
+│   ├── profile.json       # User profile (name, timezone, etc)
+│   ├── personality.json   # Bot personality settings
+│   └── preferences.json   # User preferences and settings
+├── memory/                # Persistent memory store
+│   ├── knowledge/         # Stored facts and decisions
+│   └── vector-store.ts    # Embedding-based semantic search
+├── sessions/              # Persistent chat sessions
+├── projects/              # Project-specific context and tracking
+├── heartbeats/            # System health monitoring data
+├── learning/              # Pattern learning and improvement data
+├── notifications/         # Notification routing and preferences
+├── analyzer/              # Code analysis tools and results
+├── scripts/               # Background workers and automation
+├── errors/                # Error tracking and analysis
+└── *.md                   # Various documentation and plans
 ```
 
 ### Agent Types
 
 The brain system includes several specialized agent types:
 
-- **Orchestrator**: Coordinates complex multi-step workflows
-- **Scout**: Explores and analyzes codebases
-- **Builder**: Writes and modifies code
-- **Reviewer**: Reviews code for quality and issues
-- **Tester**: Creates and runs tests
-- **Deployer**: Handles deployment operations
+- **Scout**: Explores codebases, finds patterns, analyzes architecture, and creates project maps
+- **Builder**: Writes code, implements features, refactors code, and applies patterns
+- **Reviewer**: Reviews code for bugs, security issues, and best practices
+- **Tester**: Creates tests, runs test suites, analyzes coverage, and generates test data
+- **Deployer**: Handles deployments, rollbacks, and CI/CD operations
+
+### Multi-Agent Orchestration
+
+The Agent Orchestrator coordinates multiple agents to work on complex tasks:
+
+- **Workflow Chains**: Agents can work in dependency chains
+- **Parallel Processing**: Multiple agents can run simultaneously
+- **Intelligent Task Assignment**: Routes tasks to the most appropriate agent
+- **Memory Integration**: All agents share persistent memory and learned patterns
 
 ## Architecture
 
@@ -310,12 +416,56 @@ await identity.updatePersonality({
 
 ## Development Roadmap
 
+### Completed ✅
+- [x] Multi-agent system with specialized agents
+- [x] Persistent memory with semantic search
+- [x] Git automation with smart commits
+- [x] Task queue with background processing
+- [x] Context indexer for code understanding
+- [x] Identity management and setup wizard
+- [x] Code analyzer with complexity scoring
+- [x] Pattern learning system
+- [x] Notification routing with priorities
+- [x] Background workers and automation
+
+### In Progress 🚧
+- [ ] Enhanced autonomous AI capabilities
+- [ ] Self-healing test failure recovery
+- [ ] Proactive dependency management
+
+### Planned 📋
 - [ ] Multi-user support with isolated brain instances
 - [ ] Plugin system for custom agent types
 - [ ] Web dashboard for brain system visualization
 - [ ] Integration with external memory services (Redis, SQLite)
 - [ ] Advanced workflow orchestration with dependencies
 - [ ] Real-time collaboration features
+- [ ] Voice input/output support
+- [ ] Integration with more Git providers
+- [ ] Custom agent training on user codebase
+
+See `brain/AUTONOMOUS_AI_PLAN.md` for the detailed vision of the autonomous AI system.
+
+## Additional Documentation
+
+- **[GUIDE.md](GUIDE.md)** - Comprehensive command reference and usage guide with detailed examples
+- **[brain/AUTONOMOUS_AI_PLAN.md](brain/AUTONOMOUS_AI_PLAN.md)** - Vision for autonomous AI capabilities
+- **[brain/HEARTBEAT.md](brain/HEARTBEAT.md)** - Heartbeat monitoring system documentation
+- **[brain/MORNING-BRIEFING.md](brain/MORNING-BRIEFING.md)** - Daily briefing system documentation
+- **[brain/PROACTIVE-CHECKS.md](brain/PROACTIVE-CHECKS.md)** - Proactive monitoring system documentation
+
+## Key Differentiators
+
+What makes this project unique:
+
+1. **Proactive Intelligence**: Unlike traditional bots, this system anticipates needs and can initiate actions
+2. **Persistent Memory**: Remembers past decisions, patterns, and context across sessions
+3. **Multi-Agent Coordination**: Multiple specialized AI agents work together on complex tasks
+4. **Semantic Understanding**: Vector-based memory enables context-aware responses
+5. **Autonomous Operations**: Can perform tasks without direct commands through scheduled tasks
+6. **Continuous Learning**: Improves from every interaction through pattern learning
+7. **Project Awareness**: Understands codebase structure through intelligent indexing
+8. **Mobile Development**: Full Claude Code capabilities from your mobile device via Telegram
 
 ## License
 
