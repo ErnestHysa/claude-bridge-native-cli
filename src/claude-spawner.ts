@@ -23,10 +23,9 @@ export function spawnClaudeProcess(options: {
   model?: string;
   output?: string;
   timeoutMs?: number;
-  permissionMode?: 'acceptEdits' | 'bypassPermissions' | 'default' | 'delegate' | 'dontAsk' | 'plan';
   onOutput?: (data: string) => void;  // Callback for real-time output streaming
 }): ClaudeProcess {
-  const { project, prompt, model, output, timeoutMs, permissionMode = 'acceptEdits', onOutput } = options;
+  const { project, prompt, model, output, timeoutMs, onOutput } = options;
 
   // Verify project path exists
   if (!existsSync(project.path)) {
@@ -41,10 +40,9 @@ export function spawnClaudeProcess(options: {
   // Add non-interactive flag
   args.push("--print");
 
-  // Add permission mode to allow file edits
-  // acceptEdits: Auto-accept all edit permissions (files can be written)
-  // bypassPermissions: Skip all permission checks (use with caution)
-  args.push("--permission-mode", permissionMode);
+  // IMPORTANT: Skip all permission checks since stdin is ignored (process can't wait for input)
+  // This is REQUIRED for bot use - otherwise Claude will hang waiting for permission input
+  args.push("--dangerously-skip-permissions");
 
   // Add model if specified
   if (model) args.push("--model", model);

@@ -34,7 +34,6 @@ export class ClaudeSpawner {
     const process = spawnClaudeProcess({
       ...options,
       model: options.model || this.config.claudeDefaultModel,
-      permissionMode: this.config.claudePermissionMode,
       timeoutMs: this.config.claudeTimeoutMs,
       onOutput: options.onOutput,
     });
