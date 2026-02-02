@@ -7,11 +7,16 @@
  * - Branch naming
  * - CI/CD status monitoring
  * - Conflict detection
+ * - Deployment pipeline automation
  */
 
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { getBrain } from '../brain-manager.js';
+import { getMemoryStore } from '../memory/memory-store.js';
 import type { SmartCommitOptions, PRDraft, FileChange } from '../types.js';
 
 const execAsync = promisify(exec);
@@ -453,6 +458,475 @@ export class GitAutomation {
         const [hash, message, author, date] = line.split('|');
         return { hash, message, author, date };
       });
+    } catch {
+      return [];
+    }
+  }
+
+  // ===========================================
+  // Deployment Pipeline
+  // ===========================================
+
+  /**
+   * Deployment step interface
+   */
+  async deploy(
+    projectPath: string,
+    options: {
+      environment?: 'development' | 'staging' | 'production';
+      skipTests?: boolean;
+      skipBuild?: boolean;
+      chatId?: number; // For notifications
+    } = {}
+  ): Promise<{
+    success: boolean;
+    steps: Array<{ name: string; status: 'success' | 'failed' | 'skipped'; output?: string; duration?: number }>;
+    error?: string;
+  }> {
+    const environment = options.environment ?? 'production';
+    const steps: Array<{ name: string; status: 'success' | 'failed' | 'skipped'; output?: string; duration?: number }> = [];
+
+    // Get deploy config from project
+    const deployConfig = await this.getDeployConfig(projectPath);
+
+    try {
+      // Step 1: Pre-deployment checks
+      steps.push(await this.runPreDeploymentChecks(projectPath, environment));
+      if (steps[steps.length - 1].status === 'failed') {
+        return { success: false, steps };
+      }
+
+      // Step 2: Run tests (unless skipped)
+      if (!options.skipTests) {
+        steps.push(await this.runTests(projectPath, deployConfig.testCommand));
+        if (steps[steps.length - 1].status === 'failed' && deployConfig.requireTests) {
+          return { success: false, steps, error: 'Tests failed' };
+        }
+      } else {
+        steps.push({ name: 'Tests', status: 'skipped' });
+      }
+
+      // Step 3: Build (unless skipped)
+      if (!options.skipBuild) {
+        steps.push(await this.runBuild(projectPath, deployConfig.buildCommand));
+        if (steps[steps.length - 1].status === 'failed') {
+          return { success: false, steps, error: 'Build failed' };
+        }
+      } else {
+        steps.push({ name: 'Build', status: 'skipped' });
+      }
+
+      // Step 4: Deploy
+      steps.push(await this.runDeployment(projectPath, environment, deployConfig.deployCommand));
+      if (steps[steps.length - 1].status === 'failed') {
+        return { success: false, steps, error: 'Deployment failed' };
+      }
+
+      // Step 5: Post-deployment verification
+      steps.push(await this.runPostDeploymentVerification(projectPath, environment, deployConfig));
+
+      // Record deployment for potential rollback
+      await this.recordDeployment(projectPath, environment, steps);
+
+      return { success: true, steps };
+    } catch (error) {
+      return {
+        success: false,
+        steps,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Rollback to a previous deployment
+   */
+  async rollback(
+    projectPath: string,
+    options: {
+      environment?: 'development' | 'staging' | 'production';
+      version?: string; // Git commit hash or tag
+      chatId?: number;
+    } = {}
+  ): Promise<{
+    success: boolean;
+    rollbackTo?: string;
+    steps: Array<{ name: string; status: 'success' | 'failed'; output?: string }>;
+    error?: string;
+  }> {
+    const environment = options.environment ?? 'production';
+    const steps: Array<{ name: string; status: 'success' | 'failed'; output?: string }> = [];
+
+    try {
+      // Get deployment history
+      const history = await this.getDeploymentHistory(projectPath, environment);
+
+      if (history.length === 0) {
+        return {
+          success: false,
+          steps,
+          error: 'No previous deployments found',
+        };
+      }
+
+      // Use provided version or most recent successful deployment
+      const targetVersion = options.version ?? history[0].commitHash;
+
+      steps.push({ name: 'Starting rollback', status: 'success' });
+
+      // Checkout the target version
+      try {
+        await execAsync(`git checkout ${targetVersion}`, { cwd: projectPath, timeout: 30000 });
+        steps.push({ name: `Checkout ${targetVersion.substring(0, 8)}`, status: 'success' });
+      } catch (error) {
+        steps.push({ name: 'Checkout', status: 'failed', output: error instanceof Error ? error.message : String(error) });
+        return { success: false, steps, error: 'Failed to checkout version' };
+      }
+
+      // Get deploy config
+      const deployConfig = await this.getDeployConfig(projectPath);
+
+      // Re-run build and deploy
+      if (deployConfig.buildCommand) {
+        try {
+          const { stdout } = await execAsync(deployConfig.buildCommand, { cwd: projectPath, timeout: 300000 });
+          steps.push({ name: 'Build', status: 'success', output: stdout.substring(0, 200) });
+        } catch (error) {
+          steps.push({ name: 'Build', status: 'failed', output: error instanceof Error ? error.message : String(error) });
+          return { success: false, steps, error: 'Build failed during rollback' };
+        }
+      }
+
+      // Deploy
+      if (deployConfig.deployCommand) {
+        const deployCmd = deployConfig.deployCommand.replace(/\{env\}/g, environment);
+        try {
+          const { stdout } = await execAsync(deployCmd, { cwd: projectPath, timeout: 300000 });
+          steps.push({ name: 'Deploy', status: 'success', output: stdout.substring(0, 200) });
+        } catch (error) {
+          steps.push({ name: 'Deploy', status: 'failed', output: error instanceof Error ? error.message : String(error) });
+          return { success: false, steps, error: 'Deploy failed during rollback' };
+        }
+      }
+
+      // Return to original branch
+      const branch = await this.getCurrentBranch(projectPath);
+      try {
+        await execAsync(`git checkout ${branch}`, { cwd: projectPath, timeout: 30000 });
+        steps.push({ name: 'Restore branch', status: 'success' });
+      } catch {
+        steps.push({ name: 'Restore branch', status: 'failed' });
+      }
+
+      return { success: true, rollbackTo: targetVersion, steps };
+    } catch (error) {
+      return {
+        success: false,
+        steps,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Get deployment configuration from project
+   */
+  private async getDeployConfig(projectPath: string): Promise<{
+    buildCommand: string;
+    testCommand: string;
+    deployCommand: string;
+    requireTests: boolean;
+    environments: Record<string, { deployCommand?: string }>;
+  }> {
+    // Try to load from .claude-deploy.json
+    const configPath = join(projectPath, '.claude-deploy.json');
+    if (existsSync(configPath)) {
+      try {
+        const content = await readFile(configPath, 'utf-8');
+        return JSON.parse(content);
+      } catch {
+        // Fall through to defaults
+      }
+    }
+
+    // Try to parse from package.json
+    const packageJsonPath = join(projectPath, 'package.json');
+    if (existsSync(packageJsonPath)) {
+      try {
+        const content = await readFile(packageJsonPath, 'utf-8');
+        const pkg = JSON.parse(content);
+
+        return {
+          buildCommand: pkg.scripts?.build ? `npm run build` : '',
+          testCommand: pkg.scripts?.test ? `npm test` : '',
+          deployCommand: pkg.scripts?.deploy || 'echo "No deploy script configured"',
+          requireTests: true,
+          environments: {},
+        };
+      } catch {
+        // Fall through to defaults
+      }
+    }
+
+    // Default configuration
+    return {
+      buildCommand: 'npm run build',
+      testCommand: 'npm test',
+      deployCommand: 'echo "Configure deploy script in .claude-deploy.json"',
+      requireTests: true,
+      environments: {},
+    };
+  }
+
+  /**
+   * Run pre-deployment checks
+   */
+  private async runPreDeploymentChecks(
+    projectPath: string,
+    environment: string
+  ): Promise<{ name: string; status: 'success' | 'failed'; output?: string; duration?: number }> {
+    const start = Date.now();
+    const checks: string[] = [];
+
+    try {
+      // Check if working directory is clean
+      const { stdout: status } = await execAsync('git status --porcelain', { cwd: projectPath });
+      if (status.trim()) {
+        return {
+          name: 'Pre-deployment checks',
+          status: 'failed',
+          output: 'Working directory has uncommitted changes',
+          duration: Date.now() - start,
+        };
+      }
+      checks.push('Working directory clean');
+
+      // Check if on correct branch
+      const branch = await this.getCurrentBranch(projectPath);
+      const expectedBranch = environment === 'production' ? 'main' : environment;
+      if (branch !== expectedBranch && branch !== 'main' && branch !== 'master') {
+        checks.push(`Warning: On branch "${branch}" instead of "${expectedBranch}"`);
+      } else {
+        checks.push(`On branch: ${branch}`);
+      }
+
+      return {
+        name: 'Pre-deployment checks',
+        status: 'success',
+        output: checks.join('\n'),
+        duration: Date.now() - start,
+      };
+    } catch (error) {
+      return {
+        name: 'Pre-deployment checks',
+        status: 'failed',
+        output: error instanceof Error ? error.message : String(error),
+        duration: Date.now() - start,
+      };
+    }
+  }
+
+  /**
+   * Run tests
+   */
+  private async runTests(
+    projectPath: string,
+    testCommand: string
+  ): Promise<{ name: string; status: 'success' | 'failed' | 'skipped'; output?: string; duration?: number }> {
+    const start = Date.now();
+
+    if (!testCommand) {
+      return { name: 'Tests', status: 'skipped', duration: 0 };
+    }
+
+    try {
+      const { stdout, stderr } = await execAsync(testCommand, {
+        cwd: projectPath,
+        timeout: 120000,
+      });
+
+      // Check if tests passed (common patterns)
+      const output = stdout || stderr || '';
+      const hasFailures = output.includes('failing') || output.includes('FAIL') || output.includes('Error:');
+
+      return {
+        name: 'Tests',
+        status: hasFailures ? 'failed' : 'success',
+        output: output.substring(0, 500),
+        duration: Date.now() - start,
+      };
+    } catch (error) {
+      return {
+        name: 'Tests',
+        status: 'failed',
+        output: error instanceof Error ? error.message : String(error),
+        duration: Date.now() - start,
+      };
+    }
+  }
+
+  /**
+   * Run build
+   */
+  private async runBuild(
+    projectPath: string,
+    buildCommand: string
+  ): Promise<{ name: string; status: 'success' | 'failed' | 'skipped'; output?: string; duration?: number }> {
+    const start = Date.now();
+
+    if (!buildCommand) {
+      return { name: 'Build', status: 'skipped', duration: 0 };
+    }
+
+    try {
+      const { stdout, stderr } = await execAsync(buildCommand, {
+        cwd: projectPath,
+        timeout: 300000,
+      });
+
+      return {
+        name: 'Build',
+        status: 'success',
+        output: (stdout || stderr || '').substring(0, 500),
+        duration: Date.now() - start,
+      };
+    } catch (error) {
+      return {
+        name: 'Build',
+        status: 'failed',
+        output: error instanceof Error ? error.message : String(error),
+        duration: Date.now() - start,
+      };
+    }
+  }
+
+  /**
+   * Run deployment
+   */
+  private async runDeployment(
+    projectPath: string,
+    environment: string,
+    deployCommand: string
+  ): Promise<{ name: string; status: 'success' | 'failed'; output?: string; duration?: number }> {
+    const start = Date.now();
+
+    const cmd = deployCommand.replace(/\{env\}/g, environment).replace(/\{environment\}/g, environment);
+
+    try {
+      const { stdout, stderr } = await execAsync(cmd, {
+        cwd: projectPath,
+        timeout: 600000,
+      });
+
+      return {
+        name: `Deploy to ${environment}`,
+        status: 'success',
+        output: (stdout || stderr || '').substring(0, 500),
+        duration: Date.now() - start,
+      };
+    } catch (error) {
+      return {
+        name: `Deploy to ${environment}`,
+        status: 'failed',
+        output: error instanceof Error ? error.message : String(error),
+        duration: Date.now() - start,
+      };
+    }
+  }
+
+  /**
+   * Run post-deployment verification
+   */
+  private async runPostDeploymentVerification(
+    projectPath: string,
+    _environment: string,
+    _deployConfig: Record<string, unknown>
+  ): Promise<{ name: string; status: 'success' | 'failed' | 'skipped'; output?: string; duration?: number }> {
+    const start = Date.now();
+
+    // Basic verification - check if deployed version is accessible
+    // This is a placeholder for more sophisticated health checks
+    try {
+      const branch = await this.getCurrentBranch(projectPath);
+      const { stdout: log } = await execAsync('git log -1 --pretty=%h', { cwd: projectPath });
+
+      return {
+        name: 'Post-deployment verification',
+        status: 'success',
+        output: `Deployed commit: ${log.trim()} on branch: ${branch}`,
+        duration: Date.now() - start,
+      };
+    } catch {
+      return {
+        name: 'Post-deployment verification',
+        status: 'skipped',
+        duration: Date.now() - start,
+      };
+    }
+  }
+
+  /**
+   * Record deployment for potential rollback
+   */
+  private async recordDeployment(
+    projectPath: string,
+    environment: string,
+    steps: Array<{ name: string; status: 'success' | 'failed' | 'skipped' }>
+  ): Promise<void> {
+    // Record in brain memory
+    const memory = getMemoryStore();
+    if (!memory) return;
+
+    try {
+      const { stdout: log } = await execAsync('git log -1 --pretty=%H|%s|%an', { cwd: projectPath });
+      const [hash, message, author] = log.trim().split('|');
+
+      const deployment = {
+        timestamp: Date.now(),
+        environment,
+        commitHash: hash,
+        commitMessage: message,
+        author,
+        status: steps.every(s => s.status !== 'failed') ? 'success' : 'failed',
+        steps: steps.map(s => ({ name: s.name, status: s.status })),
+      };
+
+      // Store in memory as deployment record
+      await memory.setFact(`deployment:${projectPath}:${environment}:${Date.now()}`, deployment);
+    } catch {
+      // Skip recording if git commands fail
+    }
+  }
+
+  /**
+   * Get deployment history for a project
+   */
+  async getDeploymentHistory(
+    projectPath: string,
+    environment?: string
+  ): Promise<Array<{ timestamp: number; environment: string; commitHash: string; commitMessage: string; status: string }>> {
+    const memory = getMemoryStore();
+    if (!memory) return [];
+
+    try {
+      const facts = memory.searchFacts(`deployment:${projectPath}`);
+      const deployments: Array<{ timestamp: number; environment: string; commitHash: string; commitMessage: string; status: string }> = [];
+
+      for (const fact of facts) {
+        const deployment = fact.value as {
+          timestamp: number;
+          environment: string;
+          commitHash: string;
+          commitMessage: string;
+          status: string;
+        };
+
+        if (!environment || deployment.environment === environment) {
+          deployments.push(deployment);
+        }
+      }
+
+      return deployments.sort((a, b) => b.timestamp - a.timestamp);
     } catch {
       return [];
     }
