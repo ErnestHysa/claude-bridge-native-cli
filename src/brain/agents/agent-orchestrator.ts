@@ -726,6 +726,314 @@ export class AgentOrchestrator {
     };
   }
 
+  /**
+   * Execute an autonomous task created by the Intention/Decision system
+   */
+  async executeAutonomousTask(params: {
+    intentionId: string;
+    decisionId: string;
+    chatId: number;
+    projectPath: string;
+    description: string;
+    type: string;
+    agentType: 'scout' | 'builder' | 'reviewer' | 'tester' | 'deployer';
+    transparent: boolean;
+  }): Promise<{
+    success: boolean;
+    result?: unknown;
+    error?: string;
+    changes?: Change[];
+    userMessage?: string;
+    learnings?: string[];
+  }> {
+    const { agentType, projectPath, description, transparent } = params;
+
+    try {
+      // Get the agent
+      const agents = this.getAgentsByType(agentType);
+      if (!agents || agents.length === 0) {
+        return {
+          success: false,
+          error: `No ${agentType} agents available`,
+        };
+      }
+
+      const agent = agents[0];
+      const taskId = this.generateTaskId();
+
+      // Create agent task
+      const agentTask: AgentTask = {
+        taskId,
+        agentId: agent.id,
+        dependencies: [],
+        status: 'pending' as const,
+        result: {
+          projectPath,
+          prompt: description,
+          autonomous: true,
+        },
+        startedAt: Date.now(),
+      };
+
+      // Send transparent notification if requested
+      if (transparent) {
+        this.sendTransparentNotification(params, agent);
+      }
+
+      // Execute the task
+      agentTask.status = 'running';
+      const taskResult = await this.executeAgentTask(agentTask);
+
+      // Extract changes from result
+      const changes = this.extractChanges(taskResult);
+
+      // Extract learnings
+      const learnings = this.extractLearnings(taskResult);
+
+      // Format user message
+      const userMessage = this.formatUserMessage(agent, taskResult, changes);
+
+      agentTask.status = 'completed';
+      agentTask.completedAt = Date.now();
+      agentTask.result = taskResult;
+
+      return {
+        success: true,
+        result: taskResult,
+        changes,
+        userMessage,
+        learnings,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        userMessage: `❌ Task failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  /**
+   * Send transparent notification before autonomous action
+   */
+  private sendTransparentNotification(params: {
+    intentionId: string;
+    decisionId: string;
+    chatId: number;
+    projectPath: string;
+    description: string;
+    type: string;
+    agentType: 'scout' | 'builder' | 'reviewer' | 'tester' | 'deployer';
+    transparent: boolean;
+  }, agent: Agent): void {
+    // Store the notification for delivery via Telegram bot
+    // This is a simplified version - in production, this would integrate
+    // with the notification router
+
+    const notification = {
+      type: 'autonomous_action',
+      title: `🤖 Autonomous Action: ${agent.name}`,
+      message: `I'm about to ${params.description.toLowerCase()}...`,
+      data: {
+        intentionId: params.intentionId,
+        decisionId: params.decisionId,
+        projectPath: params.projectPath,
+        agentType: params.agentType,
+        agentName: agent.name,
+      },
+      chatId: params.chatId,
+      priority: 'medium' as const,
+      timestamp: Date.now(),
+    };
+
+    // Store for delivery by bot
+    this.memory.setFact(
+      `notification:${params.chatId}:autonomous_${Date.now()}`,
+      notification
+    );
+  }
+
+  /**
+   * Extract changes from task result
+   */
+  private extractChanges(result: unknown): Change[] {
+    const changes: Change[] = [];
+
+    if (!result || typeof result !== 'object') return changes;
+
+    const res = result as Record<string, unknown>;
+
+    // Check for output with file changes
+    if (res.output && typeof res.output === 'string') {
+      // Parse for file modification patterns
+      const modifiedFiles = res.output.match(/(?:Modified|Created|Updated)\s+[`"']?([^`'"\n\r]+)/gi);
+      if (modifiedFiles) {
+        for (const match of modifiedFiles) {
+          changes.push({
+            type: 'file_modified',
+            path: match[1],
+            action: 'modified',
+          });
+        }
+      }
+    }
+
+    return changes;
+  }
+
+  /**
+   * Extract learnings from task result
+   */
+  private extractLearnings(result: unknown): string[] {
+    const learnings: string[] = [];
+
+    if (!result || typeof result !== 'object') return learnings;
+
+    const res = result as Record<string, unknown>;
+
+    // Check for errors
+    if (res.error && typeof res.error === 'string') {
+      learnings.push(`Task encountered error: ${res.error}`);
+    }
+
+    // Check for exit codes
+    if (res.exitCode && res.exitCode !== 0) {
+      learnings.push(`Task exited with code ${res.exitCode}`);
+    }
+
+    return learnings;
+  }
+
+  /**
+   * Format user message from task result
+   */
+  private formatUserMessage(
+    agent: Agent,
+    result: unknown,
+    changes: Change[]
+  ): string {
+    const res = result as Record<string, unknown>;
+
+    let message = `✅ <b>${agent.name}</b> completed autonomous action\n\n`;
+
+    // Add status
+    if (res.status === 'error') {
+      message = `⚠️ <b>${agent.name}</b> encountered issues\n\n`;
+    }
+
+    // Add changes summary
+    if (changes.length > 0) {
+      message += `<b>Changes:</b>\n`;
+      for (const change of changes.slice(0, 5)) {
+        message += `• ${change.action}: ${this.formatChange(change)}\n`;
+      }
+      if (changes.length > 5) {
+        message += `... and ${changes.length - 5} more\n`;
+      }
+      message += '\n';
+    }
+
+    // Add duration
+    if (res.duration) {
+      const duration = typeof res.duration === 'number' ? res.duration : 0;
+      const seconds = Math.round(duration / 1000);
+      message += `⏱️ Duration: ${seconds}s\n`;
+    }
+
+    return message;
+  }
+
+  /**
+   * Format a change for display
+   */
+  private formatChange(change: Change): string {
+    if (change.type === 'file_modified' && change.path) {
+      const filename = change.path.split(/[/\\]/).pop() || change.path;
+      return `${filename}`;
+    }
+    return `${change.type}: ${JSON.stringify(change)}`;
+  }
+
+  /**
+   * Create an autonomous workflow from a Decision
+   */
+  async createAutonomousWorkflow(decision: {
+    actionPlan: Array<{
+      description: string;
+      agentType: 'scout' | 'builder' | 'reviewer' | 'tester' | 'deployer';
+    }>;
+    projectPath: string;
+    chatId: number;
+  }): Promise<string> {
+    const tasks: AgentTask[] = [];
+
+    for (const step of decision.actionPlan) {
+      const agents = this.getAgentsByType(step.agentType);
+      if (!agents || agents.length === 0) {
+        throw new Error(`No ${step.agentType} agents available`);
+      }
+
+      const agent = agents[0];
+      const taskId = this.generateTaskId();
+
+      tasks.push({
+        taskId,
+        agentId: agent.id,
+        dependencies: [],
+        status: 'pending' as const,
+        result: {
+          projectPath: decision.projectPath,
+          prompt: step.description,
+          autonomous: true,
+        },
+      });
+    }
+
+    const workflow = await this.orchestrate({
+      name: `Autonomous: ${decision.actionPlan[0]?.description || 'Task'}`,
+      description: `Autonomous workflow with ${tasks.length} steps`,
+      tasks,
+    });
+
+    return workflow.id;
+  }
+
+  /**
+   * Check if an autonomous action can be executed
+   */
+  canExecuteAutonomous(
+    agentType: 'scout' | 'builder' | 'reviewer' | 'tester' | 'deployer',
+    permissionLevel: string,
+    projectHealth: number
+  ): { canExecute: boolean; reason?: string } {
+    // Check if agent is available
+    const agents = this.getAgentsByType(agentType);
+    if (!agents || agents.length === 0) {
+      return { canExecute: false, reason: `No ${agentType} agents available` };
+    }
+
+    // Check permission level
+    const allowedByPermission =
+      permissionLevel === 'autonomous' ||
+      permissionLevel === 'full' ||
+      (permissionLevel === 'supervised' && agentType !== 'builder' && agentType !== 'deployer');
+
+    if (!allowedByPermission) {
+      return { canExecute: false, reason: 'Requires user approval for this action type' };
+    }
+
+    // Check project health
+    if (projectHealth < 50 && agentType === 'builder') {
+      return { canExecute: false, reason: 'Project health is too low for autonomous code changes' };
+    }
+
+    if (projectHealth < 30) {
+      return { canExecute: false, reason: 'Project health is critically low' };
+    }
+
+    return { canExecute: true };
+  }
+
   private generateAgentId(): string {
     return `agent-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }
@@ -737,6 +1045,16 @@ export class AgentOrchestrator {
   private generateTaskId(): string {
     return `agent-task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }
+}
+
+/**
+ * Change record for autonomous actions
+ */
+interface Change {
+  type: 'file_modified' | 'file_created' | 'file_deleted' | 'test_run' | 'other';
+  path?: string;
+  action: string;
+  details?: Record<string, unknown>;
 }
 
 // Global singleton
