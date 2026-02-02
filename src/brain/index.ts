@@ -77,5 +77,69 @@ export type { CodeAnalysisReport, ComplexityResult, SecurityResult, DuplicationR
 export { PatternLearner, getPatternLearner, resetPatternLearner } from './learning/pattern-learner.js';
 export type { LearnedPatterns, NamingConvention, LibraryUsage, CodeStructure, WorkflowPattern } from './learning/pattern-learner.js';
 
+// Outcome Tracker
+export { OutcomeTracker, getOutcomeTracker, resetOutcomeTracker } from './learning/outcome-tracker.js';
+export type { ActionOutcome, LearningInsight, LearningReport, LearningMetric, OutcomeType } from './learning/outcome-tracker.js';
+
+// Intention Engine
+export { IntentionEngine, getIntentionEngine, resetIntentionEngine } from './intention/intention-engine.js';
+export type { Intention, IntentionType, IntentionSource, IntentionPriority, Trigger, IntentionFilter, Evidence } from './intention/intention-engine.js';
+
+// Decision Maker
+export { DecisionMaker, getDecisionMaker, resetDecisionMaker, PermissionLevel } from './decision/decision-maker.js';
+export type { Decision, ActionStep, Risk, UserDecisionPreferences, DecisionContext, RiskLevel } from './decision/decision-maker.js';
+
+// Context Tracker
+export { ContextTracker, getContextTracker, resetContextTracker } from './context-tracker/context-tracker.js';
+export type { ProjectContext, Trend, Severity, CommitInfo, TestRunInfo, Opportunity, Blocker } from './context-tracker/context-tracker.js';
+
+// Goal System
+export { GoalSystem, getGoalSystem, resetGoalSystem } from './goals/goal-system.js';
+export type { Goal, GoalType, GoalStatus, GoalStrategy, GoalTarget, GoalPermissions, GoalTask, GoalProgress } from './goals/goal-system.js';
+
 // Types
 export * from './types.js';
+
+// Self-healing
+export { TestHealer, getTestHealer, resetTestHealer } from './self-healing/test-healer.js';
+export type { TestFailure, HealingAttempt, HealingOutcome, HealingStrategy, FailureSeverity } from './self-healing/test-healer.js';
+
+// Dependency Management
+export { DependencyManager, getDependencyManager, resetDependencyManager } from './dependency/dependency-manager.js';
+export type { Dependency, DependencyUpdate, Vulnerability, DependencyHealth, UpdatePolicy, UpdateType, DependencySource, VulnerabilitySeverity } from './dependency/dependency-manager.js';
+
+// Refactoring Agent
+export { RefactoringAgent, getRefactoringAgent, resetRefactoringAgent } from './refactoring/refactoring-agent.js';
+export type { RefactoringOpportunity, RefactoringResult, RefactoringPolicy, RefactoringType, RefactoringComplexity, RefactoringRisk } from './refactoring/refactoring-agent.js';
+
+// Feature Workflow
+export { FeatureWorkflowManager, getFeatureWorkflow, resetFeatureWorkflow } from './feature/feature-workflow.js';
+export type { FeatureSpec, FeatureWorkflow, ImplementationTask, WorkflowStage, FeatureStatus, WorkflowOptions } from './feature/feature-workflow.js';
+
+// Morning Briefing
+export { MorningBriefing, getMorningBriefing, resetMorningBriefing } from './briefing/morning-briefing.js';
+export type { BriefingReport, BriefingContent, BriefingSchedule, BriefingSection, BriefingPriority } from './briefing/morning-briefing.js';
+
+// Transparency Tracker
+export { TransparencyTracker, getTransparencyTracker, resetTransparencyTracker } from './transparency/transparency-tracker.js';
+export type { ActionLog, TransparencyReport, ApprovalRecord, ActionStatus, ActionCategory } from './transparency/transparency-tracker.js';
+
+// Permission Manager
+export { PermissionManager, getPermissionManager, resetPermissionManager } from './permission/permission-manager.js';
+export type { PermissionCheck, PermissionGrant, PermissionRestriction, PermissionConfig, PermissionRequest } from './permission/permission-manager.js';
+
+// Rollback Manager
+export { RollbackManager, getRollbackManager, resetRollbackManager } from './rollback/rollback-manager.js';
+export type { RollbackPoint, RollbackResult, RollbackOptions, RollbackPointType, FileChange, ActionSnapshot } from './rollback/rollback-manager.js';
+
+// Opportunity Detector
+export { OpportunityDetector, getOpportunityDetector, resetOpportunityDetector } from './opportunity/opportunity-detector.js';
+export type { ImprovementOpportunity, OpportunityType, OpportunityPriority, OpportunityStatus, DetectionResult, DetectionOptions, ScanSchedule } from './opportunity/opportunity-detector.js';
+
+// Approval Workflow
+export { ApprovalWorkflow, getApprovalWorkflow, resetApprovalWorkflow } from './approval/approval-workflow.js';
+export type { ApprovalRequest, ApprovalDecision, ApprovalBatch, ApprovalPolicy, ApprovalStats, ApprovalStatus } from './approval/approval-workflow.js';
+
+// User Feedback
+export { UserFeedbackManager, getUserFeedbackManager, resetUserFeedbackManager } from './feedback/user-feedback.js';
+export type { UserFeedback, FeedbackRating, FeedbackType, FeedbackCategory, FeedbackSummary, FeedbackTrend, FeedbackPrompt } from './feedback/user-feedback.js';

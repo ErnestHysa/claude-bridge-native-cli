@@ -55,6 +55,43 @@ export class BrainManager {
     const { getTaskQueue } = await import('./tasks/task-queue.js');
     await getTaskQueue().initialize();
 
+    // Initialize autonomous AI components
+    const { getTransparencyTracker } = await import('./transparency/transparency-tracker.js');
+    await getTransparencyTracker().start();
+
+    const { getOutcomeTracker } = await import('./learning/outcome-tracker.js');
+    await getOutcomeTracker().start();
+
+    const { getPermissionManager } = await import('./permission/permission-manager.js');
+    await getPermissionManager().start();
+
+    const { getRollbackManager } = await import('./rollback/rollback-manager.js');
+    await getRollbackManager().start();
+
+    const { getOpportunityDetector } = await import('./opportunity/opportunity-detector.js');
+    await getOpportunityDetector().start();
+
+    const { getApprovalWorkflow } = await import('./approval/approval-workflow.js');
+    await getApprovalWorkflow().start();
+
+    const { getUserFeedbackManager } = await import('./feedback/user-feedback.js');
+    await getUserFeedbackManager().start();
+
+    const { getMorningBriefing } = await import('./briefing/morning-briefing.js');
+    await getMorningBriefing().start();
+
+    const { getFeatureWorkflow } = await import('./feature/feature-workflow.js');
+    await getFeatureWorkflow().start();
+
+    const { getRefactoringAgent } = await import('./refactoring/refactoring-agent.js');
+    await getRefactoringAgent().start();
+
+    const { getDependencyManager } = await import('./dependency/dependency-manager.js');
+    await getDependencyManager().start();
+
+    const { getTestHealer } = await import('./self-healing/test-healer.js');
+    await getTestHealer().start();
+
     this.initialized = true;
     this.logHeartbeat('startup', { version: this.identityManager.getIdentity().version });
   }
