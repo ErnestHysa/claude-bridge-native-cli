@@ -10,6 +10,9 @@ import type {
   EditApprovalRequest
 } from "./types.js";
 import { killClaudeProcess } from "./claude-spawner.js";
+import { readFile, writeFile, readdir, unlink } from "node:fs/promises";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * Session Manager class
@@ -17,10 +20,21 @@ import { killClaudeProcess } from "./claude-spawner.js";
 export class SessionManager {
   private sessions = new Map<number, ChatSession>();
   private projectSessions = new Map<string, Set<number>>(); // projectName → chatIds
+  private sessionsDir: string;
+  private autoSaveEnabled = true;
   // Reserved for future use: enforce concurrent session limits
   // private _maxConcurrentSessions: number;
 
-  constructor(options?: { maxConcurrentSessions?: number }) {
+  constructor(options?: { maxConcurrentSessions?: number; sessionsDir?: string }) {
+    // Use provided sessionsDir or default to brain/sessions
+    this.sessionsDir = options?.sessionsDir ?? join(process.cwd(), 'src', 'brain', 'sessions');
+
+    // Ensure sessions directory exists
+    if (!existsSync(this.sessionsDir)) {
+      // Create directory synchronously for constructor
+      mkdirSync(this.sessionsDir, { recursive: true });
+    }
+
     // Reserved for future use
     // this._maxConcurrentSessions = options?.maxConcurrentSessions ?? 5;
     void options?.maxConcurrentSessions;
@@ -99,6 +113,11 @@ export class SessionManager {
       }
       newSet.add(chatId);
     }
+
+    // Auto-save
+    if (this.autoSaveEnabled) {
+      this.saveSession(chatId).catch(err => console.error('Auto-save failed:', err));
+    }
   }
 
   /**
@@ -135,6 +154,11 @@ export class SessionManager {
     const maxHistory = 100;
     if (session.conversationHistory.length > maxHistory) {
       session.conversationHistory = session.conversationHistory.slice(-maxHistory);
+    }
+
+    // Auto-save (debounced - only save after every few messages would be better, but simple for now)
+    if (this.autoSaveEnabled) {
+      this.saveSession(chatId).catch(err => console.error('Auto-save failed:', err));
     }
   }
 
@@ -209,7 +233,7 @@ export class SessionManager {
   /**
    * Remove a session (logout/cleanup)
    */
-  removeSession(chatId: number): void {
+  async removeSession(chatId: number): Promise<void> {
     const session = this.sessions.get(chatId);
     if (!session) return;
 
@@ -230,6 +254,9 @@ export class SessionManager {
     }
 
     this.sessions.delete(chatId);
+
+    // Delete saved session file
+    await this.deleteSavedSession(chatId);
   }
 
   /**
@@ -260,7 +287,7 @@ export class SessionManager {
   /**
    * Clean up idle sessions
    */
-  cleanupIdleSessions(timeoutMs: number): number[] {
+  async cleanupIdleSessions(timeoutMs: number): Promise<number[]> {
     const now = Date.now();
     const removedChatIds: number[] = [];
 
@@ -272,7 +299,7 @@ export class SessionManager {
         !session.claudeProcess
       ) {
         removedChatIds.push(chatId);
-        this.removeSession(chatId);
+        await this.removeSession(chatId);
       }
     }
 
@@ -301,5 +328,166 @@ export class SessionManager {
         ])
       ),
     };
+  }
+
+  // ===========================================
+  // Session Persistence
+  // ===========================================
+
+  /**
+   * Save a single session to disk
+   */
+  private async saveSession(chatId: number): Promise<void> {
+    const session = this.sessions.get(chatId);
+    if (!session) return;
+
+    const filePath = join(this.sessionsDir, `${chatId}.json`);
+
+    // Create a serializable version of the session
+    // Note: claudeProcess is NOT saved as it contains live process handles
+    const serializableSession = {
+      chatId: session.chatId,
+      username: session.username,
+      firstName: session.firstName,
+      lastName: session.lastName,
+      currentProject: session.currentProject,
+      conversationHistory: session.conversationHistory,
+      status: session.status === "processing" ? "idle" : session.status, // Reset processing status on reload
+      lastActivity: session.lastActivity,
+      savedAt: Date.now(),
+    };
+
+    try {
+      await writeFile(filePath, JSON.stringify(serializableSession, null, 2));
+    } catch (error) {
+      console.error(`Failed to save session for chat ${chatId}:`, error);
+    }
+  }
+
+  /**
+   * Load a single session from disk
+   */
+  private async loadSession(chatId: number): Promise<ChatSession | null> {
+    const filePath = join(this.sessionsDir, `${chatId}.json`);
+
+    if (!existsSync(filePath)) {
+      return null;
+    }
+
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      const data = JSON.parse(content) as {
+        chatId: number;
+        username?: string;
+        firstName?: string;
+        lastName?: string;
+        currentProject: Project | null;
+        conversationHistory: ConversationMessage[];
+        status: ChatSession["status"];
+        lastActivity: number;
+      };
+
+      // Reconstruct the session
+      const session: ChatSession = {
+        chatId: data.chatId,
+        username: data.username,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        currentProject: data.currentProject,
+        claudeProcess: null, // Never restore live processes
+        conversationHistory: data.conversationHistory ?? [],
+        pendingApproval: null,
+        status: data.status === "processing" ? "idle" : data.status,
+        lastActivity: data.lastActivity,
+      };
+
+      return session;
+    } catch (error) {
+      console.error(`Failed to load session for chat ${chatId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Save all sessions to disk
+   */
+  async saveSessions(): Promise<void> {
+    const savePromises: Promise<void>[] = [];
+
+    for (const [chatId] of this.sessions.entries()) {
+      savePromises.push(this.saveSession(chatId));
+    }
+
+    await Promise.allSettled(savePromises);
+  }
+
+  /**
+   * Load all sessions from disk
+   */
+  async loadSessions(): Promise<number> {
+    if (!existsSync(this.sessionsDir)) {
+      return 0;
+    }
+
+    try {
+      const files = await readdir(this.sessionsDir);
+      const chatIds = files
+        .filter(f => f.endsWith('.json'))
+        .map(f => parseInt(f.replace('.json', ''), 10))
+        .filter(n => !isNaN(n));
+
+      let loaded = 0;
+      for (const chatId of chatIds) {
+        const session = await this.loadSession(chatId);
+        if (session) {
+          this.sessions.set(chatId, session);
+
+          // Restore project sessions mapping
+          if (session.currentProject) {
+            let projectSet = this.projectSessions.get(session.currentProject.name);
+            if (!projectSet) {
+              projectSet = new Set();
+              this.projectSessions.set(session.currentProject.name, projectSet);
+            }
+            projectSet.add(chatId);
+          }
+
+          loaded++;
+        }
+      }
+
+      return loaded;
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Delete a saved session file
+   */
+  async deleteSavedSession(chatId: number): Promise<void> {
+    const filePath = join(this.sessionsDir, `${chatId}.json`);
+    if (existsSync(filePath)) {
+      try {
+        await unlink(filePath);
+      } catch (error) {
+        console.error(`Failed to delete saved session for chat ${chatId}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Enable or disable auto-save
+   */
+  setAutoSave(enabled: boolean): void {
+    this.autoSaveEnabled = enabled;
+  }
+
+  /**
+   * Get the sessions directory path
+   */
+  getSessionsDir(): string {
+    return this.sessionsDir;
   }
 }
