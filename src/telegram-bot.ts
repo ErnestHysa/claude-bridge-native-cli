@@ -22,6 +22,7 @@ import {
   getCIMonitor,
   getConversationIndexer,
   getDocWriter,
+  getDependencyManager,
   startScheduledJobs,
   loadSelfReviewContext,
   getTestWatcher,
@@ -245,6 +246,9 @@ export class TelegramBotHandler {
     );
     this.bot.onText(/\/docs(?:\s+(.+))?/, (msg, match) =>
       this.handleDocs(msg, match?.[1])
+    );
+    this.bot.onText(/\/dependencies(?:\s+(.+))?/, (msg, match) =>
+      this.handleDependencies(msg, match?.[1])
     );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
     this.bot.onText(/\/logs(?:\s+(.+))?/, (msg, match) =>
@@ -1938,6 +1942,195 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       }
     } catch (error) {
       this.logger.error('Docs command error', { error, command, args });
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} Error: ${error instanceof Error ? escapeHtml(error.message) : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Handle /dependencies command - Dependency management
+   * Usage:
+   *   /dependencies - Show help
+   *   /dependencies check - Check for outdated dependencies
+   *   /dependencies audit - Run security audit (npm audit)
+   *   /dependencies update <package> - Update a specific package
+   *   /dependencies update --fix - Fix all security vulnerabilities
+   */
+  private async handleDependencies(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+    const session = this.sessionManager.getSession(chatId);
+
+    // Ensure dependency manager is initialized
+    const depManager = getDependencyManager();
+    try {
+      await depManager.start();
+    } catch {
+      // Already initialized
+    }
+
+    // Show help if no arguments
+    if (!args) {
+      let help = `${getBrain().getEmoji()} <b>Dependency Management</b>\n\n`;
+      help += `<b>Available commands:</b>\n\n`;
+      help += `<code>/dependencies</code> - Show this help\n`;
+      help += `<code>/dependencies check</code> - Check for outdated dependencies\n`;
+      help += `<code>/dependencies audit</code> - Run security audit\n`;
+      help += `<code>/dependencies update [pkg]</code> - Update specific package\n`;
+      help += `<code>/dependencies update --fix</code> - Fix all vulnerabilities\n\n`;
+
+      if (session?.currentProject) {
+        help += `<b>Current project:</b> ${escapeHtml(session.currentProject.name)}\n`;
+      } else {
+        help += `<i>No project selected. Use /select first.</i>\n`;
+      }
+
+      await this.bot.sendMessage(chatId, help, { parse_mode: "HTML" });
+      return;
+    }
+
+    // Check if project is selected
+    if (!session?.currentProject) {
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} No project selected.\n\nPlease select a project with /select first.`
+      );
+      return;
+    }
+
+    const projectPath = session.currentProject.path;
+    const [command, ...rest] = args.split(' ');
+    const target = rest.join(' ');
+
+    try {
+      switch (command.toLowerCase()) {
+        case 'check': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Checking for outdated dependencies...`
+          );
+
+          const health = await depManager.checkProject(projectPath);
+          const outdated = await depManager.checkOutdated(projectPath);
+          const vulnerabilities = await depManager.checkVulnerabilities(projectPath);
+
+          let report = `${getBrain().getEmoji()} <b>Dependency Health</b>\n\n`;
+          report += `📦 Total Dependencies: ${health.totalDependencies}\n`;
+          report += `📊 Health Score: ${health.healthScore}/100\n`;
+          report += `⬆️ Outdated: ${outdated.length}\n`;
+          report += `🔒 Vulnerabilities: ${vulnerabilities.length}\n`;
+          report += `🕐 Last Checked: ${new Date(health.lastChecked).toLocaleString()}\n\n`;
+
+          if (outdated.length > 0) {
+            report += `<b>Updates Available:</b>\n\n`;
+            for (const update of outdated.slice(0, 10)) {
+              const typeIcon = update.updateType === 'patch' ? '🔹' : update.updateType === 'minor' ? '🔸' : '🔶';
+              report += `${typeIcon} <code>${update.name}</code>\n`;
+              report += `   ${update.current} → ${update.latest}\n`;
+            }
+            if (outdated.length > 10) {
+              report += `\n... and ${outdated.length - 10} more\n`;
+            }
+            report += '\n';
+          }
+
+          if (vulnerabilities.length > 0) {
+            report += `<b>⚠️ Security Vulnerabilities:</b>\n\n`;
+            for (const vuln of vulnerabilities.slice(0, 5)) {
+              const severityIcon = vuln.severity === 'critical' ? '🔴' : vuln.severity === 'high' ? '🟠' : vuln.severity === 'moderate' ? '🟡' : '🟢';
+              report += `${severityIcon} <code>${vuln.name}</code> - ${vuln.severity}\n`;
+            }
+            if (vulnerabilities.length > 5) {
+              report += `\n... and ${vulnerabilities.length - 5} more\n`;
+            }
+          }
+
+          await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          break;
+        }
+
+        case 'audit': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Running security audit...`
+          );
+
+          const vulnerabilities = await depManager.checkVulnerabilities(projectPath);
+
+          if (vulnerabilities.length === 0) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} ✅ No vulnerabilities found!\n\nYour dependencies are secure.`
+            );
+          } else {
+            let report = `${getBrain().getEmoji()} <b>Security Audit Results</b>\n\n`;
+            report += `Found ${vulnerabilities.length} vulnerabilities:\n\n`;
+
+            for (const vuln of vulnerabilities) {
+              const severityIcon = vuln.severity === 'critical' ? '🔴' : vuln.severity === 'high' ? '🟠' : vuln.severity === 'moderate' ? '🟡' : '🟢';
+              report += `${severityIcon} <b>${escapeHtml(vuln.name)}</b> - ${vuln.severity.toUpperCase()}\n`;
+              report += `${escapeHtml(vuln.title || 'No title')}\n`;
+              if (vuln.url) {
+                report += `🔗 ${escapeHtml(vuln.url)}\n`;
+              }
+              report += '\n';
+            }
+
+            report += `Use <code>/dependencies update --patch</code> to patch vulnerabilities.\n`;
+            await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          }
+          break;
+        }
+
+        case 'update': {
+          if (!target) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/dependencies update [package|--fix]</code>\n\n• package: Update specific package\n• --fix: Fix all security vulnerabilities`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Updating dependencies...`
+          );
+
+          if (target === '--fix') {
+            const fixed = await depManager.fixVulnerabilities(projectPath);
+            await this.bot.sendMessage(
+              chatId,
+              fixed
+                ? `${getBrain().getEmoji()} ✅ Vulnerabilities fixed!\n\nRun <code>npm install</code> to apply changes.`
+                : `${getBrain().getEmoji()} No fixable vulnerabilities found.\n\nSome vulnerabilities may require manual intervention.`,
+              { parse_mode: "HTML" }
+            );
+          } else {
+            await depManager.updateDependency(projectPath, target);
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} ✅ Updated <code>${escapeHtml(target)}</code>\n\nRun <code>npm install</code> to apply changes.`,
+              { parse_mode: "HTML" }
+            );
+          }
+          break;
+        }
+
+        default:
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Unknown command: <code>${escapeHtml(command)}</code>\n\nUse /dependencies for help.`,
+            { parse_mode: "HTML" }
+          );
+      }
+    } catch (error) {
+      this.logger.error('Dependencies command error', { error, command, args });
       await this.bot.sendMessage(
         chatId,
         `${getBrain().getEmoji()} Error: ${error instanceof Error ? escapeHtml(error.message) : 'Unknown error'}`
