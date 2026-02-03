@@ -62,6 +62,10 @@ export { GitAutomation, getGitAutomation } from './git/git-automation.js';
 export { CIMonitor, getCIMonitor } from './cicd/index.js';
 export type { CIProvider, BuildStatus, CIBuild, CIConfig, CIProject } from './cicd/index.js';
 
+// Conversation Indexer
+export { ConversationIndexer, getConversationIndexer } from './conversations/index.js';
+export type { ConversationMessage, SearchQuery, SearchResult } from './conversations/index.js';
+
 // Scheduler
 export { startScheduledJobs, loadSelfReviewContext, getSelfReviewStatus } from './scheduler.js';
 

@@ -18,6 +18,7 @@ import {
   getOrchestrator,
   getTaskQueue,
   getCIMonitor,
+  getConversationIndexer,
   startScheduledJobs,
   loadSelfReviewContext,
   getTestWatcher,
@@ -165,6 +166,7 @@ export class TelegramBotHandler {
       { command: "agents", description: "Show running agents" },
       { command: "git", description: "Git operations (commit, status, log)" },
       { command: "cicd", description: "CI/CD monitoring (add, remove, status, builds)" },
+      { command: "history", description: "Search chat history" },
       { command: "metrics", description: "Show performance metrics" },
       { command: "profile", description: "View your profile" },
       { command: "schedule", description: "Schedule a task with cron" },
@@ -234,6 +236,9 @@ export class TelegramBotHandler {
     );
     this.bot.onText(/\/cicd(?:\s+(.+))?/, (msg, match) =>
       this.handleCICD(msg, match?.[1])
+    );
+    this.bot.onText(/\/history(?:\s+(.+))?/, (msg, match) =>
+      this.handleHistory(msg, match?.[1])
     );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
     this.bot.onText(/\/logs(?:\s+(.+))?/, (msg, match) =>
@@ -1555,6 +1560,131 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
             `• /cicd check - Trigger immediate check`,
           { parse_mode: "HTML" }
         );
+    }
+  }
+
+  /**
+   * Handle /history command - Search chat history
+   * Usage:
+   *   /history - Show recent messages from current chat
+   *   /history <query> - Search messages by keyword
+   *   /history <query> --limit 20 - Limit results
+   *   /history --stats - Show conversation statistics
+   */
+  private async handleHistory(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+    const convIndexer = getConversationIndexer();
+
+    // Ensure conversation indexer is initialized
+    try {
+      await convIndexer.initialize();
+    } catch {
+      // Already initialized
+    }
+
+    // Check for special flags
+    if (args?.includes('--stats')) {
+      const stats = convIndexer.getStats();
+
+      let message = `${getBrain().getEmoji()} <b>Conversation Statistics</b>\n\n`;
+      message += `📊 Total Messages: ${stats.totalMessages}\n`;
+      message += `💬 Chats: ${stats.chatsCount}\n`;
+      message += `👥 Users: ${stats.usersCount}\n\n`;
+
+      if (Object.keys(stats.byCommand).length > 0) {
+        message += `📝 Top Commands:\n`;
+        const sortedCommands = Object.entries(stats.byCommand)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 10);
+        for (const [cmd, count] of sortedCommands) {
+          message += `• ${cmd}: ${count}\n`;
+        }
+      }
+
+      await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+      return;
+    }
+
+    // Parse query and options
+    let searchQuery = args?.split('--')[0]?.trim() || '';
+    let limit = 20;
+    const limitMatch = args?.match(/--limit\s+(\d+)/);
+    if (limitMatch) {
+      limit = parseInt(limitMatch[1], 10);
+    }
+
+    if (!searchQuery) {
+      // Show recent messages
+      const history = convIndexer.getHistory(chatId, limit);
+
+      if (history.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          `${getBrain().getEmoji()} No conversation history found.\n\nMessages will be indexed as you interact with the bot.`
+        );
+        return;
+      }
+
+      let message = `${getBrain().getEmoji()} <b>Recent Messages</b> (${history.length}):\n\n`;
+
+      for (const msg of history) {
+        const typeEmoji = msg.messageType === 'user' ? '👤' : msg.messageType === 'bot' ? '🤖' : '⚙️';
+        const date = new Date(msg.timestamp).toLocaleString();
+        message += `${typeEmoji} <code>${date.split(',')[0]}</code>`;
+
+        if (msg.username) {
+          message += ` <i>${escapeHtml(msg.username)}</i>`;
+        }
+
+        message += `\n`;
+
+        const text = msg.text.length > 100 ? msg.text.substring(0, 100) + '...' : msg.text;
+        message += `${escapeHtml(text)}\n\n`;
+      }
+
+      await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+    } else {
+      // Search messages
+      const results = convIndexer.search({
+        query: searchQuery,
+        chatId,
+        limit,
+      });
+
+      if (results.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          `${getBrain().getEmoji()} No results found for "<b>${escapeHtml(searchQuery)}</b>".`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
+      let message = `${getBrain().getEmoji()} <b>Search Results</b> (${results.length} found):\n\n`;
+
+      for (const { message: msg, score } of results) {
+        const typeEmoji = msg.messageType === 'user' ? '👤' : msg.messageType === 'bot' ? '🤖' : '⚙️';
+        const date = new Date(msg.timestamp).toLocaleString();
+        const relevance = Math.round(score * 100);
+
+        message += `${typeEmoji} <code>${date.split(',')[0]}</code> [${relevance}%]\n`;
+
+        // Highlight matching text
+        const text = msg.text.length > 150 ? msg.text.substring(0, 150) + '...' : msg.text;
+        message += `${escapeHtml(text)}\n`;
+
+        if (msg.command) {
+          message += `   Command: <code>${escapeHtml(msg.command)}</code>\n`;
+        }
+
+        message += `\n`;
+      }
+
+      await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
     }
   }
 
@@ -3768,6 +3898,51 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       console.log("Task queue initialized with claude_query executor.");
     } catch (error) {
       this.logger.error("Failed to initialize task queue", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Initialize conversation indexer
+    try {
+      const { getConversationIndexer } = await import('./brain/conversations/index.js');
+      const convIndexer = getConversationIndexer();
+      await convIndexer.initialize();
+
+      // Set up message indexing middleware for user messages
+      this.bot.on('message', async (msg) => {
+        // Index user messages
+        if (msg.text && msg.text.trim()) {
+          await convIndexer.indexMessage(msg, 'user', msg.text);
+        }
+      });
+
+      // Wrap bot.sendMessage to index bot responses
+      const originalSendMessage = this.bot.sendMessage.bind(this.bot);
+      this.bot.sendMessage = async (chatId: number | string, text: string, options?: TelegramBot.SendMessageOptions) => {
+        const result = await originalSendMessage(chatId, text, options);
+
+        // Index bot responses (only text messages)
+        if (typeof text === 'string' && text.trim()) {
+          try {
+            // Create a minimal Message-like object for indexing
+            const mockMsg = {
+              message_id: result.message_id,
+              chat: { id: typeof chatId === 'number' ? chatId : parseInt(chatId as string, 10) },
+              from: { id: 0, username: 'bot' }, // Bot messages
+              date: Math.floor(Date.now() / 1000),
+            };
+            await convIndexer.indexMessage(mockMsg as any, 'bot', text);
+          } catch {
+            // Silently fail on indexing errors
+          }
+        }
+
+        return result;
+      };
+
+      console.log("Conversation indexer initialized.");
+    } catch (error) {
+      this.logger.error("Failed to initialize conversation indexer", {
         error: error instanceof Error ? error.message : String(error),
       });
     }
