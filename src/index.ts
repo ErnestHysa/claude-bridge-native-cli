@@ -94,6 +94,14 @@ function setupShutdownHandlers(bot: TelegramBotHandler): void {
       // Stop the bot
       await bot.stop();
 
+      // Stop recovery manager (marks as clean shutdown)
+      try {
+        const { getRecoveryManager } = await import('./brain/recovery/index.js');
+        await getRecoveryManager().stop();
+      } catch {
+        // Recovery manager might not be initialized
+      }
+
       logger.info("Shutdown complete.");
       process.exit(0);
     } catch (error) {
