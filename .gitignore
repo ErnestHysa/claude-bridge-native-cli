@@ -36,3 +36,10 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Runtime data (contains sensitive info like chat IDs, sessions, etc.)
+brain/
+*.db
+*.db-shm
+*.db-wal
+nul
