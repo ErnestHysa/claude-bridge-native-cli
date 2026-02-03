@@ -15,6 +15,10 @@ import type {
   HeartbeatEntry
 } from './types.js';
 import { getIdentityManager } from './identity.js';
+import { getMetricsTracker } from './metrics/index.js';
+import { getCheckpointManager } from './checkpoint/index.js';
+import { getDatabaseManager } from './database/index.js';
+import { getRecoveryManager } from './recovery/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = dirname(__dirname);
@@ -43,6 +47,20 @@ export class BrainManager {
 
     // Ensure all directories exist
     this.ensureDirectories();
+
+    // Start recovery manager FIRST to detect unclean shutdowns
+    const recoveryInfo = await getRecoveryManager().start();
+
+    // Log if we had an unclean shutdown
+    if (recoveryInfo.hasUncleanShutdown) {
+      console.error('[BrainManager] Unclean shutdown detected!');
+      if (recoveryInfo.lastHeartbeat) {
+        console.error(`[BrainManager] Previous PID: ${recoveryInfo.lastHeartbeat.pid}, Uptime: ${Math.floor(recoveryInfo.lastHeartbeat.uptime / 1000)}s`);
+      }
+      if (recoveryInfo.crashReports.length > 0) {
+        console.error(`[BrainManager] Crash reports: ${recoveryInfo.crashReports.length}`);
+      }
+    }
 
     // Load identity from files
     await this.identityManager.load();
@@ -91,6 +109,15 @@ export class BrainManager {
 
     const { getTestHealer } = await import('./self-healing/test-healer.js');
     await getTestHealer().start();
+
+    // Initialize metrics tracker
+    await getMetricsTracker().start();
+
+    // Initialize database (SQLite)
+    await getDatabaseManager().initialize();
+
+    // Initialize checkpoint manager (starts periodic saving)
+    await getCheckpointManager().start();
 
     this.initialized = true;
     this.logHeartbeat('startup', { version: this.identityManager.getIdentity().version });
@@ -234,31 +261,21 @@ export class BrainManager {
    * Get today's metrics
    */
   async getTodayMetrics(): Promise<DailyMetrics> {
-    // TODO: Load today's metrics from file
-    const metricsPath = join(HEARTBEATS_DIR, `${new Date().toISOString().split('T')[0]}.json`);
+    return getMetricsTracker().getTodayMetrics();
+  }
 
-    const { readFile } = await import('node:fs/promises');
-    const { existsSync: existsSyncSync } = await import('node:fs');
-
-    if (existsSyncSync(metricsPath)) {
-      try {
-        const content = await readFile(metricsPath, 'utf-8');
-        return JSON.parse(content);
-      } catch {
-        // Fall through to defaults
-      }
-    }
-
-    return {
-      date: new Date().toISOString().split('T')[0],
-      tasksCompleted: 0,
-      tasksFailed: 0,
-      claudeQueries: 0,
-      linesOfCodeChanged: 0,
-      filesModified: 0,
-      activeProjects: [],
-      uptimeMs: 0,
-    };
+  /**
+   * Track a metric increment
+   */
+  trackMetrics(increments: {
+    tasksCompleted?: number;
+    tasksFailed?: number;
+    claudeQueries?: number;
+    filesModified?: number;
+    linesOfCodeChanged?: number;
+    activeProject?: string;
+  }): void {
+    getMetricsTracker().increment(increments);
   }
 
   // ===========================================
