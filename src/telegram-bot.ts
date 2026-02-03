@@ -17,6 +17,7 @@ import {
   getContextIndexer,
   getOrchestrator,
   getTaskQueue,
+  getCIMonitor,
   startScheduledJobs,
   loadSelfReviewContext,
   getTestWatcher,
@@ -162,7 +163,8 @@ export class TelegramBotHandler {
       { command: "tasks", description: "List all active tasks" },
       { command: "agent", description: "Run a specific agent" },
       { command: "agents", description: "Show running agents" },
-      { command: "git", description: "Git operations (commit, pr, status)" },
+      { command: "git", description: "Git operations (commit, status, log)" },
+      { command: "cicd", description: "CI/CD monitoring (add, remove, status, builds)" },
       { command: "metrics", description: "Show performance metrics" },
       { command: "profile", description: "View your profile" },
       { command: "schedule", description: "Schedule a task with cron" },
@@ -229,6 +231,9 @@ export class TelegramBotHandler {
     this.bot.onText(/\/agents/, (msg) => this.handleAgents(msg));
     this.bot.onText(/\/git(?:\s+(.+))?/, (msg, match) =>
       this.handleGit(msg, match?.[1])
+    );
+    this.bot.onText(/\/cicd(?:\s+(.+))?/, (msg, match) =>
+      this.handleCICD(msg, match?.[1])
     );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
     this.bot.onText(/\/logs(?:\s+(.+))?/, (msg, match) =>
@@ -1326,6 +1331,228 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
         await this.bot.sendMessage(
           chatId,
           `Unknown git command: <b>${escapeHtml(subCommand)}</b>\n\nAvailable: commit, status, log`,
+          { parse_mode: "HTML" }
+        );
+    }
+  }
+
+  /**
+   * Handle /cicd command - CI/CD monitoring
+   * Usage:
+   *   /cicd status - Show CI/CD status and stats
+   *   /cicd add <provider> - Add current project to CI/CD monitoring
+   *   /cicd remove - Remove current project from monitoring
+   *   /cicd builds - Show recent builds for current project
+   *   /cicd failed - Show recent failed builds
+   *   /cicd check - Trigger immediate check of all projects
+   */
+  private async handleCICD(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const ciMonitor = getCIMonitor();
+
+    // Ensure CI monitor is initialized
+    try {
+      await ciMonitor.initialize();
+    } catch {
+      // Already initialized
+    }
+
+    const subCommand = args?.split(" ")[0] || "status";
+
+    switch (subCommand) {
+      case "add": {
+        const session = this.sessionManager.getSession(chatId);
+        if (!session?.currentProject) {
+          await this.bot.sendMessage(
+            chatId,
+            "No project selected. Use /select first."
+          );
+          return;
+        }
+
+        // Parse provider from args
+        const parts = args?.split(" ") || [];
+        const provider = (parts[1] || "github") as "github" | "gitlab" | "jenkins";
+
+        await ciMonitor.addProject(session.currentProject.path, {
+          provider,
+          enabled: true,
+          notifyOnFailure: true,
+          notifyOnSuccess: false,
+        });
+
+        await this.bot.sendMessage(
+          chatId,
+          `${getBrain().getEmoji()} Added <b>${escapeHtml(session.currentProject.name)}</b> to CI/CD monitoring (${provider}).`,
+          { parse_mode: "HTML" }
+        );
+        break;
+      }
+
+      case "remove": {
+        const session = this.sessionManager.getSession(chatId);
+        if (!session?.currentProject) {
+          await this.bot.sendMessage(
+            chatId,
+            "No project selected. Use /select first."
+          );
+          return;
+        }
+
+        const removed = await ciMonitor.removeProject(session.currentProject.path);
+        if (removed) {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Removed <b>${escapeHtml(session.currentProject.name)}</b> from CI/CD monitoring.`,
+            { parse_mode: "HTML" }
+          );
+        } else {
+          await this.bot.sendMessage(
+            chatId,
+            "Project was not being monitored."
+          );
+        }
+        break;
+      }
+
+      case "builds": {
+        const session = this.sessionManager.getSession(chatId);
+        if (!session?.currentProject) {
+          await this.bot.sendMessage(
+            chatId,
+            "No project selected. Use /select first."
+          );
+          return;
+        }
+
+        const builds = ciMonitor.getBuilds(session.currentProject.path, 10);
+
+        if (builds.length === 0) {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} No CI/CD builds found for <b>${escapeHtml(session.currentProject.name)}</b>.\n\nUse /cicd add to start monitoring.`,
+            { parse_mode: "HTML" }
+          );
+          return;
+        }
+
+        let message = `${getBrain().getEmoji()} <b>Recent Builds</b> (${session.currentProject.name}):\n\n`;
+
+        for (const build of builds) {
+          const statusEmoji = {
+            success: "✅",
+            failed: "❌",
+            in_progress: "🔄",
+            pending: "⏳",
+            unknown: "❓",
+          }[build.status];
+
+          message += `${statusEmoji} <code>${build.commitHash}</code> ${escapeHtml(build.commitMessage.substring(0, 50))}\n`;
+          if (build.workflowName) {
+            message += `   Workflow: ${escapeHtml(build.workflowName)}\n`;
+          }
+          message += `   Branch: ${escapeHtml(build.branch)} • `;
+          message += build.completedAt
+            ? formatRelativeTime(build.completedAt)
+            : formatRelativeTime(build.startedAt);
+          message += "\n\n";
+        }
+
+        await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+        break;
+      }
+
+      case "failed": {
+        const failedBuilds = ciMonitor.getFailedBuilds(10);
+
+        if (failedBuilds.length === 0) {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} No failed builds found.`
+          );
+          return;
+        }
+
+        let message = `${getBrain().getEmoji()} <b>Recent Failed Builds</b>:\n\n`;
+
+        for (const build of failedBuilds) {
+          message += `❌ <code>${build.commitHash}</code> ${escapeHtml(build.commitMessage.substring(0, 40))}\n`;
+          message += `   Project: ${escapeHtml(build.projectPath)}\n`;
+          message += `   Branch: ${escapeHtml(build.branch)}\n`;
+          if (build.url) {
+            message += `   <a href="${build.url}">View details</a>\n`;
+          }
+          message += `   ${formatRelativeTime(build.startedAt)}\n\n`;
+        }
+
+        await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+        break;
+      }
+
+      case "check": {
+        await this.bot.sendMessage(
+          chatId,
+          `${getBrain().getEmoji()} Checking CI/CD status for all projects...`
+        );
+
+        await ciMonitor.checkAll();
+
+        await this.bot.sendMessage(
+          chatId,
+          `✅ CI/CD check complete.`
+        );
+        break;
+      }
+
+      case "status": {
+        const stats = ciMonitor.getStats();
+        const projects = ciMonitor.getProjects();
+
+        let message = `${getBrain().getEmoji()} <b>CI/CD Monitor Status</b>\n\n`;
+        message += `📊 Statistics:\n`;
+        message += `• Projects monitored: ${stats.totalProjects}\n`;
+        message += `• Total builds tracked: ${stats.totalBuilds}\n`;
+        message += `• Success: ${stats.successCount} ✅\n`;
+        message += `• Failed: ${stats.failedCount} ❌\n`;
+        message += `• In progress: ${stats.inProgressCount} 🔄\n\n`;
+
+        if (projects.length > 0) {
+          message += `📁 Monitored Projects:\n`;
+          for (const project of projects) {
+            const projectBuilds = project.builds.slice(0, 3);
+            const lastStatus = projectBuilds[0]?.status || "unknown";
+            const statusEmoji = {
+              success: "✅",
+              failed: "❌",
+              in_progress: "🔄",
+              pending: "⏳",
+              unknown: "❓",
+            }[lastStatus];
+
+            message += `• ${statusEmoji} <code>${escapeHtml(project.path.split("\\").pop() || project.path)}</code> (${project.config.provider})\n`;
+          }
+        }
+
+        await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+        break;
+      }
+
+      default:
+        await this.bot.sendMessage(
+          chatId,
+          `Unknown cicd command: <b>${escapeHtml(subCommand)}</b>\n\n` +
+            `Available commands:\n` +
+            `• /cicd status - Show CI/CD status\n` +
+            `• /cicd add <provider> - Add current project (github, gitlab, jenkins)\n` +
+            `• /cicd remove - Remove current project\n` +
+            `• /cicd builds - Show recent builds\n` +
+            `• /cicd failed - Show failed builds\n` +
+            `• /cicd check - Trigger immediate check`,
           { parse_mode: "HTML" }
         );
     }

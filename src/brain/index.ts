@@ -58,6 +58,10 @@ export { AgentOrchestrator, getOrchestrator } from './agents/agent-orchestrator.
 // Git Automation
 export { GitAutomation, getGitAutomation } from './git/git-automation.js';
 
+// CI/CD Monitor
+export { CIMonitor, getCIMonitor } from './cicd/index.js';
+export type { CIProvider, BuildStatus, CIBuild, CIConfig, CIProject } from './cicd/index.js';
+
 // Scheduler
 export { startScheduledJobs, loadSelfReviewContext, getSelfReviewStatus } from './scheduler.js';
 
