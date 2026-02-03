@@ -60,6 +60,7 @@ export interface UserPreferences {
       end: number;
       timezone: string;
     };
+    inactiveHours?: InactiveHours; // When autonomous mode is active
   };
   notifications: {
     enabled: boolean;
@@ -302,3 +303,47 @@ export interface ConversationMessage {
   content: string;
   timestamp: number;
 }
+
+// ===========================================
+// Autonomous / Activity Types
+// ===========================================
+
+/**
+ * User activity state for autonomous mode control
+ */
+export type UserActivityState = 'ACTIVE' | 'INACTIVE' | 'AWAY';
+
+/**
+ * Inactive hours time window for autonomous mode
+ * Format: HH:MM-HH:MM (e.g., "03:00-11:00")
+ */
+export interface InactiveHours {
+  start: string; // HH:MM format (24-hour)
+  end: string;   // HH:MM format (24-hour)
+  enabled: boolean;
+}
+
+/**
+ * User activity data stored in memory
+ */
+export interface UserActivityData {
+  chatId: number;
+  state: UserActivityState;
+  inactiveHours: InactiveHours;
+  lastActivity: number; // timestamp of last user message
+  autonomousEnabled: boolean; // manual override from /autonomous command
+  stateSince: number; // when current state started
+}
+
+/**
+ * Time window for checking activity
+ */
+export interface TimeWindow {
+  startMinutes: number; // minutes from midnight (0-1439)
+  endMinutes: number;   // minutes from midnight (0-1439)
+}
+
+/**
+ * Autonomous mode type
+ */
+export type AutonomousMode = 'inactive_autonomous' | 'active_command' | 'away_pending';

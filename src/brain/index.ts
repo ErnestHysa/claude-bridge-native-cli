@@ -155,3 +155,7 @@ export type { ApprovalRequest, ApprovalDecision, ApprovalBatch, ApprovalPolicy, 
 // User Feedback
 export { UserFeedbackManager, getUserFeedbackManager, resetUserFeedbackManager } from './feedback/user-feedback.js';
 export type { UserFeedback, FeedbackRating, FeedbackType, FeedbackCategory, FeedbackSummary, FeedbackTrend, FeedbackPrompt } from './feedback/user-feedback.js';
+
+// Activity Tracker
+export { ActivityTracker, getActivityTracker, resetActivityTracker, isWithinInactiveHours, parseTimeWindow, formatTimeWindow } from './autonomous/activity-tracker.js';
+export type { UserActivityData, UserActivityState, InactiveHours, AutonomousMode, TimeWindow } from './types.js';

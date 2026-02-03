@@ -10,14 +10,10 @@
  * - Maintain documentation sync with code changes
  */
 
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, basename, extname } from 'node:path';
 import { getBrain } from '../brain-manager.js';
-
-const execAsync = promisify(exec);
 
 // ============================================
 // Types
@@ -94,6 +90,43 @@ export class DocWriterAgent {
       await mkdir(this.docsDir, { recursive: true });
     }
     console.log('[DocWriter] Initialized');
+  }
+
+  /**
+   * Recursively find files matching a pattern (cross-platform)
+   */
+  private async findFiles(dir: string, extensions: string[]): Promise<string[]> {
+    const results: string[] = [];
+    const excludedDirs = ['node_modules', 'dist', 'build', '.git', 'coverage', '.next', 'out'];
+
+    async function traverse(currentPath: string) {
+      try {
+        const entries = await readdir(currentPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+          const fullPath = join(currentPath, entry.name);
+
+          // Skip excluded directories
+          if (entry.isDirectory() && excludedDirs.includes(entry.name)) {
+            continue;
+          }
+
+          if (entry.isDirectory()) {
+            await traverse(fullPath);
+          } else if (entry.isFile()) {
+            const ext = extname(entry.name).toLowerCase();
+            if (extensions.includes(ext)) {
+              results.push(fullPath);
+            }
+          }
+        }
+      } catch {
+        // Skip directories we can't read
+      }
+    }
+
+    await traverse(dir);
+    return results;
   }
 
   /**
@@ -337,12 +370,8 @@ export class DocWriterAgent {
    * Analyze a project structure
    */
   async analyzeProject(projectPath: string): Promise<{ files: CodeFile[]; stats: any }> {
-    const { stdout } = await execAsync(
-      `find "${projectPath}" -type f \\( -name "*.ts" -o -name "*.js" -o -name "*.tsx" -o -name "*.jsx" \\) -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "*/build/*"`,
-      { timeout: 30000 }
-    ).catch(() => ({ stdout: '' }));
-
-    const filePaths = stdout.trim().split('\n').filter(Boolean);
+    // Use cross-platform file finding
+    const filePaths = await this.findFiles(projectPath, ['.ts', '.tsx', '.js', '.jsx']);
     const files: CodeFile[] = [];
 
     for (const path of filePaths) {

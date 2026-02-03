@@ -527,6 +527,12 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 /git commit - Smart commit with AI message
 /git status - Show git status
 /git log - Show recent commits
+/history &lt;query&gt; - Search chat history
+/docs &lt;command&gt; - Generate documentation
+/dependencies &lt;cmd&gt; - Manage dependencies
+/feature &lt;cmd&gt; - Feature workflow management
+/refactor &lt;cmd&gt; - Code refactoring automation
+/cicd &lt;cmd&gt; - CI/CD monitoring
 /metrics - Show today's performance metrics
 /logs [type] [lines] - View logs (app/error/audit, default 20 lines)
 /state - View system state and checkpoints
