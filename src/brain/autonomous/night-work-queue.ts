@@ -19,8 +19,10 @@
 
 import { getMemoryStore } from '../memory/memory-store.js';
 import { getGoalSystem } from '../goals/goal-system.js';
+import { getIntentionEngine } from '../intention/intention-engine.js';
 import type { TaskPriority } from '../types.js';
 import type { Goal } from '../goals/goal-system.js';
+import type { Intention, IntentionFilter } from '../intention/intention-engine.js';
 
 // ===========================================
 // Night Work Task
@@ -479,11 +481,171 @@ export class NightWorkQueue {
 
   /**
    * Sync tasks from intentions
-   * TODO: Implement full integration with intention engine
+   * Creates night work tasks for high-confidence pending intentions
    */
-  private async syncFromIntentions(_chatId?: number): Promise<number> {
-    // Stub - will be implemented when intention engine integration is ready
-    return 0;
+  private async syncFromIntentions(chatId?: number): Promise<number> {
+    try {
+      const intentionEngine = getIntentionEngine();
+
+      // Create filter for active, high-confidence intentions
+      const filter: IntentionFilter = {
+        minConfidence: 0.6,
+        active: true,
+      };
+
+      if (chatId) {
+        filter.chatId = chatId;
+      }
+
+      // Get matching intentions
+      const intentions = await intentionEngine.queryIntentions(filter);
+
+      let addedCount = 0;
+
+      for (const intention of intentions) {
+        // Filter by chatId if specified
+        if (chatId && intention.chatId !== chatId) continue;
+
+        // Skip expired intentions
+        if (intention.expiresAt && intention.expiresAt < Date.now()) continue;
+
+        // Only process high-priority or medium-priority intentions
+        if (intention.priority === 'low') continue;
+
+        // Check if a task for this intention already exists in queue
+        const existingTasks = Array.from(this.state.tasks.values())
+          .filter(t => t.source === 'intention' && t.sourceId === intention.id);
+
+        const hasActiveTask = existingTasks.some(t =>
+          ['pending', 'scheduled', 'ready', 'running'].includes(t.status)
+        );
+
+        if (hasActiveTask) continue;
+
+        // Map intention type to night work task type
+        const taskType = this.mapIntentionToTaskType(intention.type);
+
+        // Map intention priority to task priority
+        const priority = this.mapIntentionPriority(intention.priority);
+
+        // Determine required permission based on intention type and confidence
+        const requiredPermission = this.getIntentionPermissionLevel(intention);
+
+        // Create the task
+        const task: Omit<NightWorkTask, 'id' | 'createdAt' | 'retryCount' | 'status'> = {
+          type: taskType,
+          priority,
+          title: intention.title,
+          description: `${intention.description}\n\nReasoning: ${intention.reasoning}`,
+          source: 'intention',
+          sourceId: intention.id,
+          chatId: intention.chatId,
+          requiredPermission,
+          context: {
+            projectId: intention.projectPath,
+            metadata: {
+              intentionType: intention.type,
+              intentionSource: intention.source,
+              confidence: intention.confidence,
+              suggestedAction: intention.suggestedAction,
+              evidence: intention.evidence,
+            },
+          },
+          maxRetries: 1,
+          scheduledFor: intention.expiresAt,
+          estimatedDuration: this.estimateIntentionDuration(intention),
+        };
+
+        await this.addTask(task);
+        addedCount++;
+      }
+
+      return addedCount;
+    } catch (error) {
+      console.error('Error syncing from intentions:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Map intention type to night work task type
+   */
+  private mapIntentionToTaskType(intentionType: string): NightWorkTaskType {
+    const typeMap: Record<string, NightWorkTaskType> = {
+      refactor: 'refactoring',
+      fix: 'custom',
+      improve: 'custom',
+      analyze: 'custom',
+      implement: 'custom',
+      update: 'dependency_update',
+      test: 'test_fix',
+      optimize: 'custom',
+      document: 'documentation',
+    };
+
+    return typeMap[intentionType] || 'custom';
+  }
+
+  /**
+   * Map intention priority to task priority
+   */
+  private mapIntentionPriority(priority: string): 'urgent' | 'high' | 'medium' | 'low' {
+    if (priority === 'urgent') return 'urgent';
+    if (priority === 'high') return 'high';
+    if (priority === 'low') return 'low';
+    return 'medium';
+  }
+
+  /**
+   * Determine permission level required for an intention-based task
+   */
+  private getIntentionPermissionLevel(intention: Intention): NightWorkTask['requiredPermission'] {
+    // High-confidence, low-risk intentions can be autonomous
+    if (intention.confidence >= 0.9) {
+      switch (intention.type) {
+        case 'document':
+        case 'test':
+          return 'autonomous';
+        case 'refactor':
+        case 'improve':
+          return 'supervised';
+        default:
+          return 'supervised';
+      }
+    }
+
+    // Lower confidence needs supervision
+    if (intention.confidence >= 0.7) {
+      return 'supervised';
+    }
+
+    // Low confidence needs approval
+    return 'advisory';
+  }
+
+  /**
+   * Estimate duration for an intention-based task
+   */
+  private estimateIntentionDuration(intention: Intention): number {
+    // Base duration by type (in milliseconds)
+    const baseDurations: Record<string, number> = {
+      refactor: 45 * 60 * 1000,     // 45 minutes
+      fix: 30 * 60 * 1000,          // 30 minutes
+      improve: 30 * 60 * 1000,      // 30 minutes
+      analyze: 20 * 60 * 1000,      // 20 minutes
+      implement: 60 * 60 * 1000,    // 60 minutes
+      update: 15 * 60 * 1000,       // 15 minutes
+      test: 25 * 60 * 1000,         // 25 minutes
+      optimize: 40 * 60 * 1000,     // 40 minutes
+      document: 20 * 60 * 1000,     // 20 minutes
+    };
+
+    const base = baseDurations[intention.type] || 30 * 60 * 1000;
+
+    // Adjust based on confidence (lower confidence = more time needed)
+    const confidenceMultiplier = 1 + (1 - intention.confidence) * 0.5;
+
+    return Math.floor(base * confidenceMultiplier);
   }
 
   /**

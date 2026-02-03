@@ -792,6 +792,60 @@ export class IntentionEngine {
   }
 
   /**
+   * Query intentions with filters
+   */
+  async queryIntentions(filter: IntentionFilter): Promise<Intention[]> {
+    const now = Date.now();
+    const intentions = Array.from(this.intentions.values());
+
+    return intentions.filter(intention => {
+      // Filter by types
+      if (filter.types && !filter.types.includes(intention.type)) return false;
+
+      // Filter by sources
+      if (filter.sources && !filter.sources.includes(intention.source)) return false;
+
+      // Filter by priorities
+      if (filter.priorities && !filter.priorities.includes(intention.priority)) return false;
+
+      // Filter by min confidence
+      if (filter.minConfidence && intention.confidence < filter.minConfidence) return false;
+
+      // Filter by project path
+      if (filter.projectPath && intention.projectPath !== filter.projectPath) return false;
+
+      // Filter by chat ID
+      if (filter.chatId && intention.chatId !== filter.chatId) return false;
+
+      // Filter active (non-expired)
+      if (filter.active) {
+        if (intention.expiresAt && intention.expiresAt < now) return false;
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Get an intention by ID
+   */
+  async getIntentionById(intentionId: string): Promise<Intention | null> {
+    return this.intentions.get(intentionId) || null;
+  }
+
+  /**
+   * Update intention status
+   */
+  async updateIntentionStatus(intentionId: string, _status: 'pending' | 'in_progress' | 'completed' | 'failed'): Promise<void> {
+    const intention = this.intentions.get(intentionId);
+    if (!intention) return;
+
+    intention.timestamp = Date.now(); // Update timestamp to reflect status change
+    // Note: We don't have a status field in Intention, so this is a no-op
+    // In a real implementation, we'd add status tracking to intentions
+  }
+
+  /**
    * Generate unique ID
    */
   private generateId(): string {
