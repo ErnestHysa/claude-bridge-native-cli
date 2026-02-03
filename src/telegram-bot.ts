@@ -23,6 +23,7 @@ import {
   getConversationIndexer,
   getDocWriter,
   getDependencyManager,
+  getFeatureWorkflow,
   startScheduledJobs,
   loadSelfReviewContext,
   getTestWatcher,
@@ -249,6 +250,9 @@ export class TelegramBotHandler {
     );
     this.bot.onText(/\/dependencies(?:\s+(.+))?/, (msg, match) =>
       this.handleDependencies(msg, match?.[1])
+    );
+    this.bot.onText(/\/feature(?:\s+(.+))?/, (msg, match) =>
+      this.handleFeature(msg, match?.[1])
     );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
     this.bot.onText(/\/logs(?:\s+(.+))?/, (msg, match) =>
@@ -2131,6 +2135,312 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       }
     } catch (error) {
       this.logger.error('Dependencies command error', { error, command, args });
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} Error: ${error instanceof Error ? escapeHtml(error.message) : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Handle /feature command - Feature workflow management
+   * Usage:
+   *   /feature - Show help and list active features
+   *   /feature list - List all features
+   *   /feature status <id> - Show feature status and progress
+   *   /feature new - Create a new feature (starts interactive flow)
+   *   /feature start <id> - Start/resume feature implementation
+   *   /feature pause <id> - Pause feature workflow
+   *   /feature abort <id> - Abort feature workflow
+   */
+  private async handleFeature(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+    const session = this.sessionManager.getSession(chatId);
+
+    // Get feature workflow manager
+    const featureWorkflow = getFeatureWorkflow();
+    try {
+      await featureWorkflow.start();
+    } catch {
+      // Already initialized
+    }
+
+    // Show help if no arguments
+    if (!args) {
+      const workflows = featureWorkflow.getWorkflows({});
+
+      let help = `${getBrain().getEmoji()} <b>Feature Workflow</b>\n\n`;
+      help += `<b>Available commands:</b>\n\n`;
+      help += `<code>/feature</code> - Show this help\n`;
+      help += `<code>/feature list</code> - List all features\n`;
+      help += `<code>/feature status [id]</code> - Show feature status\n`;
+      help += `<code>/feature new</code> - Create new feature\n`;
+      help += `<code>/feature start [id]</code> - Start implementation\n`;
+      help += `<code>/feature pause [id]</code> - Pause workflow\n`;
+      help += `<code>/feature abort [id]</code> - Abort workflow\n\n`;
+
+      if (workflows.length > 0) {
+        help += `<b>Active Features:</b>\n\n`;
+        for (const wf of workflows.slice(0, 5)) {
+          const statusIcon = wf.status === 'active' ? '🔄' : wf.status === 'completed' ? '✅' : wf.status === 'paused' ? '⏸️' : '❌';
+          help += `${statusIcon} <code>${wf.id.slice(-8)}</code> ${escapeHtml(wf.feature.name)}\n`;
+          help += `   Stage: ${wf.currentStage} (${wf.progress}%)\n`;
+        }
+        if (workflows.length > 5) {
+          help += `\n... and ${workflows.length - 5} more\n`;
+        }
+      } else {
+        help += `<i>No active features.</i>\n`;
+      }
+
+      if (session?.currentProject) {
+        help += `\n<b>Current project:</b> ${escapeHtml(session.currentProject.name)}\n`;
+      }
+
+      await this.bot.sendMessage(chatId, help, { parse_mode: "HTML" });
+      return;
+    }
+
+    // Check if project is selected for commands that need it
+    const needsProject = ['new', 'start'];
+    const [command, ...rest] = args.split(' ');
+    const target = rest.join(' ');
+
+    if (needsProject.includes(command.toLowerCase()) && !session?.currentProject) {
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} No project selected.\n\nPlease select a project with /select first.`
+      );
+      return;
+    }
+
+    try {
+      switch (command.toLowerCase()) {
+        case 'list': {
+          const workflows = featureWorkflow.getWorkflows({});
+
+          if (workflows.length === 0) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} No features found.\n\nUse /feature new to create a new feature.`
+            );
+            return;
+          }
+
+          let report = `${getBrain().getEmoji()} <b>All Features</b> (${workflows.length})\n\n`;
+
+          for (const wf of workflows) {
+            const statusIcon = wf.status === 'active' ? '🔄' : wf.status === 'completed' ? '✅' : wf.status === 'paused' ? '⏸️' : '❌';
+            report += `${statusIcon} <b>${escapeHtml(wf.feature.name)}</b>\n`;
+            report += `   ID: <code>${wf.id.slice(-8)}</code>\n`;
+            report += `   Stage: ${wf.currentStage}\n`;
+            report += `   Progress: ${wf.progress}%\n`;
+            report += `   Status: ${wf.status}\n`;
+            if (wf.feature.projectPath) {
+              report += `   Project: ${escapeHtml(basename(wf.feature.projectPath))}\n`;
+            }
+            report += '\n';
+          }
+
+          await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          break;
+        }
+
+        case 'status': {
+          if (!target) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/feature status [id]</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          const workflow = featureWorkflow.getWorkflow(target);
+          if (!workflow) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Feature not found: <code>${escapeHtml(target)}</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          let report = `${getBrain().getEmoji()} <b>${escapeHtml(workflow.feature.name)}</b>\n\n`;
+          report += `📋 <b>Description:</b> ${escapeHtml(workflow.feature.description)}\n\n`;
+          report += `📊 Stage: <b>${workflow.currentStage}</b>\n`;
+          report += `Progress: ${workflow.progress}%\n`;
+          report += `Status: ${workflow.status}\n`;
+          report += `Priority: ${workflow.feature.priority}\n`;
+          report += `Complexity: ${workflow.feature.complexity}\n\n`;
+
+          if (workflow.tasks.length > 0) {
+            report += `<b>Tasks (${workflow.tasks.length}):</b>\n\n`;
+            for (const task of workflow.tasks.slice(0, 10)) {
+              const taskIcon = task.status === 'completed' ? '✅' : task.status === 'in_progress' ? '🔄' : task.status === 'failed' ? '❌' : '⏳';
+              report += `${taskIcon} <code>${task.id.slice(-6)}</code> ${escapeHtml(task.title)}\n`;
+            }
+            if (workflow.tasks.length > 10) {
+              report += `   ... and ${workflow.tasks.length - 10} more\n`;
+            }
+          }
+
+          if (workflow.feature.requirements.length > 0) {
+            report += `\n<b>Requirements:</b>\n`;
+            for (const req of workflow.feature.requirements) {
+              report += `• ${escapeHtml(req)}\n`;
+            }
+          }
+
+          await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          break;
+        }
+
+        case 'new': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} <b>Create New Feature</b>\n\n` +
+            `To create a new feature, please provide:\n\n` +
+            `<b>1. Feature Name:</b>\n` +
+            `What should this feature be called?\n\n` +
+            `Use: <code>/feature create "Feature Name" "Description"</code>`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case 'create': {
+          // Parse feature name and description
+          const parts = target.match(/^"([^"]+)"\s*"([^"]+)"$/);
+          if (!parts) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Invalid format.\n\nUsage: <code>/feature create "Name" "Description"</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          const [, name, description] = parts;
+          const projectPath = session!.currentProject!.path;
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Creating feature: <b>${escapeHtml(name)}</b>...`,
+            { parse_mode: "HTML" }
+          );
+
+          const workflow = await featureWorkflow.createFeature({
+            name,
+            description,
+            requirements: [], // Will be populated by AI
+            acceptanceCriteria: [],
+            projectPath,
+            chatId,
+          });
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} ✅ Feature created!\n\n` +
+            `ID: <code>${workflow.id.slice(-8)}</code>\n` +
+            `Name: ${escapeHtml(workflow.feature.name)}\n\n` +
+            `Use <code>/feature start ${workflow.id.slice(-8)}</code> to begin implementation.`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case 'start': {
+          if (!target) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/feature start [id]</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Starting feature implementation...`
+          );
+
+          await featureWorkflow.executeWorkflow(target, {
+            autoImplement: true,
+            autoTest: true,
+            autoReview: false,
+            autoPR: false,
+            requireApproval: false,
+          });
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} 🔄 Feature workflow started!\n\n` +
+            `The feature is now being implemented. Use <code>/feature status ${target}</code> to check progress.`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case 'pause': {
+          if (!target) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/feature pause [id]</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          await featureWorkflow.pauseWorkflow(target);
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} ⏸️ Feature paused.\n\nUse <code>/feature start ${target}</code> to resume.`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case 'abort': {
+          if (!target) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/feature abort [id]</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          const paused = await featureWorkflow.pauseWorkflow(target);
+          if (paused) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} ⏸️ Feature workflow paused.\n\nTo permanently remove, delete the workflow from storage.`,
+              { parse_mode: "HTML" }
+            );
+          } else {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Could not pause feature workflow.`,
+              { parse_mode: "HTML" }
+            );
+          }
+          break;
+        }
+
+        default:
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Unknown command: <code>${escapeHtml(command)}</code>\n\nUse /feature for help.`,
+            { parse_mode: "HTML" }
+          );
+      }
+    } catch (error) {
+      this.logger.error('Feature command error', { error, command, args });
       await this.bot.sendMessage(
         chatId,
         `${getBrain().getEmoji()} Error: ${error instanceof Error ? escapeHtml(error.message) : 'Unknown error'}`
