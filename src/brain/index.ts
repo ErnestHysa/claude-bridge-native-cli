@@ -55,6 +55,10 @@ export { TaskQueue, getTaskQueue } from './tasks/task-queue.js';
 // Agent Orchestrator
 export { AgentOrchestrator, getOrchestrator } from './agents/agent-orchestrator.js';
 
+// DocWriter Agent
+export { DocWriterAgent, getDocWriter, resetDocWriter } from './agents/doc-writer.js';
+export type { DocGenerationOptions, CodeFile, DocumentationTemplate, DocSection, GeneratedDoc, CommentInsertion } from './agents/doc-writer.js';
+
 // Git Automation
 export { GitAutomation, getGitAutomation } from './git/git-automation.js';
 

@@ -9,6 +9,8 @@ import { ProjectManager } from "./project-manager-class.js";
 import { ClaudeSpawner } from "./claude-spawner-class.js";
 import type { BridgeConfig } from "./types.js";
 import { escapeHtml, chunkMessage, formatRelativeTime, Logger, sanitizePath, generateId } from "./utils.js";
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import {
   getBrain,
   getMemoryStore,
@@ -19,6 +21,7 @@ import {
   getTaskQueue,
   getCIMonitor,
   getConversationIndexer,
+  getDocWriter,
   startScheduledJobs,
   loadSelfReviewContext,
   getTestWatcher,
@@ -240,6 +243,9 @@ export class TelegramBotHandler {
     this.bot.onText(/\/history(?:\s+(.+))?/, (msg, match) =>
       this.handleHistory(msg, match?.[1])
     );
+    this.bot.onText(/\/docs(?:\s+(.+))?/, (msg, match) =>
+      this.handleDocs(msg, match?.[1])
+    );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
     this.bot.onText(/\/logs(?:\s+(.+))?/, (msg, match) =>
       this.handleLogs(msg, match?.[1])
@@ -384,6 +390,18 @@ export class TelegramBotHandler {
       msg.chat.id,
       "You are not authorized to use this bot."
     );
+  }
+
+  /**
+   * Resolve a file path relative to project directory
+   */
+  private resolvePath(projectPath: string, targetFile: string): string {
+    // If absolute path, return as-is
+    if (targetFile.startsWith('/') || /^[a-zA-Z]:/.test(targetFile)) {
+      return targetFile;
+    }
+    // Otherwise, resolve relative to project
+    return resolve(projectPath, targetFile);
   }
 
   /**
@@ -1685,6 +1703,245 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       }
 
       await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+    }
+  }
+
+  /**
+   * Handle /docs command - Documentation generation and management
+   * Usage:
+   *   /docs - Show documentation commands help
+   *   /docs readme - Generate README.md for current project
+   *   /docs api - Generate API documentation
+   *   /docs analyze - Analyze project structure
+   *   /docs explain <file> - Explain a code file
+   *   /docs comment <file> - Add inline comments to a file
+   *   /docs sync - Sync documentation with code changes
+   */
+  private async handleDocs(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+    const session = this.sessionManager.getSession(chatId);
+
+    // Ensure doc writer is initialized
+    const docWriter = getDocWriter();
+    try {
+      await docWriter.initialize();
+    } catch {
+      // Already initialized
+    }
+
+    // Show help if no arguments
+    if (!args) {
+      let help = `${getBrain().getEmoji()} <b>Documentation Commands</b>\n\n`;
+      help += `<b>Available commands:</b>\n\n`;
+      help += `<code>/docs readme</code> - Generate README.md for current project\n`;
+      help += `<code>/docs api</code> - Generate API documentation\n`;
+      help += `<code>/docs analyze</code> - Analyze project structure\n`;
+      help += `<code>/docs explain [file]</code> - Explain a code file\n`;
+      help += `<code>/docs comment [file]</code> - Add inline comments to a file\n`;
+      help += `<code>/docs sync</code> - Sync documentation with code changes\n\n`;
+
+      if (session?.currentProject) {
+        help += `<b>Current project:</b> ${escapeHtml(session.currentProject.name)}\n`;
+      } else {
+        help += `<i>No project selected. Use /select first.</i>\n`;
+      }
+
+      await this.bot.sendMessage(chatId, help, { parse_mode: "HTML" });
+      return;
+    }
+
+    // Check if project is selected
+    if (!session?.currentProject) {
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} No project selected.\n\nPlease select a project with /select first.`
+      );
+      return;
+    }
+
+    const projectPath = session.currentProject.path;
+    const [command, ...rest] = args.split(' ');
+    const targetFile = rest.join(' ');
+
+    try {
+      switch (command.toLowerCase()) {
+        case 'readme': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Generating README.md...`
+          );
+
+          const result = await docWriter.generateREADME(projectPath, {
+            includeTypes: true,
+            includeExamples: true,
+            includeExports: true,
+          });
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} <b>README.md Generated!</b>\n\n` +
+            `📄 ${result.files.length} file(s) updated\n` +
+            `📊 ${result.metadata.sourceFiles.length} source files analyzed\n` +
+            `⏱ ${new Date(result.metadata.generatedAt).toLocaleString()}`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case 'api': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Generating API documentation...`
+          );
+
+          const result = await docWriter.generateAPIDocs(projectPath, {
+            includeTypes: true,
+            includeExports: true,
+          });
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} <b>API Documentation Generated!</b>\n\n` +
+            `📄 docs/API.md created\n` +
+            `📊 ${result.metadata.sourceFiles.length} source files analyzed`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case 'analyze': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Analyzing project structure...`
+          );
+
+          const analysis = await docWriter.analyzeProject(projectPath);
+
+          let report = `${getBrain().getEmoji()} <b>Project Analysis</b>\n\n`;
+          report += `📊 <b>Total Files:</b> ${analysis.stats.totalFiles}\n`;
+          report += `📝 <b>Total Lines:</b> ${analysis.stats.totalLines}\n`;
+          report += `💬 <b>Files with Comments:</b> ${analysis.stats.commentedFiles}/${analysis.stats.totalFiles}\n\n`;
+
+          if (analysis.stats.byType) {
+            report += `<b>Files by Type:</b>\n`;
+            for (const [type, files] of Object.entries(analysis.stats.byType)) {
+              const arr = files as any[];
+              report += `• ${type}: ${arr.length}\n`;
+            }
+          }
+
+          await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          break;
+        }
+
+        case 'explain': {
+          if (!targetFile) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/docs explain [file]</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          const filePath = this.resolvePath(projectPath, targetFile);
+          const content = await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Reading and analyzing ${escapeHtml(targetFile)}...`,
+            { parse_mode: "HTML" }
+          ).then(() => readFile(filePath, 'utf-8').catch(() => null));
+
+          if (!content) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Could not read file: ${escapeHtml(targetFile)}`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          const explanation = await docWriter.explainCode(content);
+
+          // Send in chunks if too long
+          const chunks = chunkMessage(explanation);
+          for (const chunk of chunks) {
+            await this.bot.sendMessage(chatId, `<pre>${escapeHtml(chunk)}</pre>`, { parse_mode: "HTML" });
+          }
+          break;
+        }
+
+        case 'comment': {
+          if (!targetFile) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/docs comment [file]</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          const filePath = this.resolvePath(projectPath, targetFile);
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Adding inline comments to ${escapeHtml(targetFile)}...`,
+            { parse_mode: "HTML" }
+          );
+
+          const insertions = await docWriter.addInlineComments(filePath, 'jsdoc');
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} <b>Comments Added!</b>\n\n` +
+            `📝 ${insertions.length} comment(s) added to ${escapeHtml(targetFile)}`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case 'sync': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Syncing documentation...`
+          );
+
+          const result = await docWriter.syncDocumentation(projectPath);
+
+          if (result.updated.length > 0) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} <b>Documentation Synced!</b>\n\n` +
+              `✅ Updated:\n${result.updated.map((f: string) => `• ${basename(f)}`).join('\n')}`,
+              { parse_mode: "HTML" }
+            );
+          } else {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} No documentation files to sync.\n\n` +
+              `Use /docs readme or /docs api to generate documentation first.`,
+              { parse_mode: "HTML" }
+            );
+          }
+          break;
+        }
+
+        default:
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Unknown command: <code>${escapeHtml(command)}</code>\n\nUse /docs for help.`,
+            { parse_mode: "HTML" }
+          );
+      }
+    } catch (error) {
+      this.logger.error('Docs command error', { error, command, args });
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} Error: ${error instanceof Error ? escapeHtml(error.message) : 'Unknown error'}`
+      );
     }
   }
 
