@@ -4,12 +4,55 @@ A Telegram bot that bridges Claude Code CLI with Telegram messaging, allowing yo
 
 ## Features
 
+### Core Bot Features
 - **Full Claude Code CLI Access**: Interact with Claude through Telegram messages
 - **Project Management**: Auto-scan and manage multiple projects
 - **Session Management**: Per-chat session state with conversation history
 - **Git Integration**: See branch and status for Git repositories
 - **File Edit Approval**: Configurable approval for dangerous operations
 - **Graceful Shutdown**: Proper cleanup of active processes
+
+### Memory & Context
+- **Persistent Memory Store**: Store and retrieve facts, decisions, and patterns across sessions
+- **Semantic Search**: Vector-based embedding search for context-aware memory retrieval
+- **Code Indexing**: Automatic project structure understanding with file/symbol tracking
+- **Context Awareness**: Project-specific context isolation and tracking
+
+### Task & Agent System
+- **Background Tasks**: Queue and manage tasks with priority scheduling
+- **Multi-Agent System**: Coordinate specialized agents (Scout, Builder, Reviewer, Tester, Deployer)
+- **Smart Git Operations**: Auto-generated commit messages and PR descriptions
+- **Parallel Execution**: Run multiple agents simultaneously for complex tasks
+
+### Autonomous AI
+- **Intention Engine**: Proactive detection of improvement opportunities
+- **Decision System**: Autonomous decision-making with user approval workflow
+- **Goal Tracking**: Define high-level objectives and track progress automatically
+- **Opportunity Scanner**: Continuous scanning for code quality improvements
+- **Test Healer**: Self-healing system for automatic test failure detection and fixing
+- **Dependency Manager**: Automated dependency updates with security checks
+- **Refactoring Agent**: Autonomous code refactoring with rollback capability
+
+### Data Persistence (NEW)
+- **Winston Logging**: Structured logging to files with daily rotation
+- **Metrics Tracking**: Daily metrics that persist across restarts
+- **Checkpoint System**: Periodic state snapshots every 30 seconds
+- **SQLite Database**: Critical data storage (sessions, tasks, audit, decisions)
+- **Crash Recovery**: Automatic detection and recovery from unclean shutdowns
+- **Data Export**: Export all data for backup or analysis
+
+### Self-Improvement
+- **Code Analysis**: Complexity analysis, security scanning, duplication detection
+- **Pattern Learning**: Automatic detection of coding patterns and conventions
+- **Daily Briefings**: Weather, activity recap, GitHub activity, project ideas
+- **Proactive Checks**: Unpushed commits, stuck tasks, code quality alerts
+- **Learning Log**: Tracks mistakes and improvements over time
+
+### Identity & Personalization
+- **Setup Wizard**: Interactive first-time setup for personalized experience
+- **Customizable Personality**: Define bot communication style and behavior
+- **User Preferences**: Timezone, coding conventions, preferred languages
+- **Notification Management**: Priority-based routing with quiet hours
 
 ## Brain System - AI-Powered Development Assistant
 
@@ -37,6 +80,35 @@ This project has evolved into a sophisticated AI development assistant with a co
 - **Project Context Tracking**: Per-project memory and context isolation
 - **Session Persistence**: All sessions survive restarts with full state restoration
 - **Self-Improvement System**: Continuous learning from interactions and outcomes
+
+### 🆕 Data Persistence System (NEW)
+
+The application now includes comprehensive persistence that survives restarts:
+
+- **Winston Logging**: Structured logging to files with daily rotation
+  - Logs stored in `brain/logs/` (app, error, audit)
+  - Automatic rotation (30 days for app, 90 days for errors, 1 year for audit)
+  - Clean log formatting with timestamps and metadata
+
+- **Metrics Tracking**: Daily metrics that persist across restarts
+  - Tasks completed/failed, Claude queries, files modified
+  - Stored in `brain/metrics/{date}.json`
+  - Automatically tracked during bot operation
+
+- **Checkpoint System**: Periodic state snapshots every 30 seconds
+  - Stored in `brain/checkpoints/`
+  - Captures sessions, metrics, brain state
+  - Automatic recovery on startup after unclean shutdown
+
+- **SQLite Database**: Critical data stored in relational database
+  - Sessions, tasks, audit logs, decisions
+  - Located at `brain/database/claude-bridge.db`
+  - Supports full CRUD operations and data export
+
+- **Recovery System**: Detects and recovers from crashes
+  - Heartbeat file updated every 5 seconds
+  - Crash reports created on unclean shutdown
+  - Automatic state restoration on startup
 
 ### Autonomous AI Systems
 
@@ -161,15 +233,13 @@ npm run lint         # Lint code
 - `/selfreview` - View learning log from self-improvement system
 
 #### Autonomous AI Commands
-- `/goals` - List all active goals
-- `/goal <id>` - View goal details and progress
-- `/creategoal` - Create a new goal
-- `/opportunities` - List detected improvement opportunities
-- `/scan` - Run opportunity detection scan
+- `/goals [action]` - List all active goals or manage (use `create:<type>`, `complete:<id>`, `list`)
+- `/intentions [filter]` - View active intentions
 - `/autonomous <on/off>` - Toggle autonomous mode
-- `/decisions` - View recent autonomous decisions
-- `/transparency` - View autonomous action log
-- `/approvals` - View pending approval requests
+- `/decisions [filter]` - View recent autonomous decisions
+- `/permissions [level]` - View or set permission level
+- `/approve <id>` - Approve a pending action
+- `/deny <id> [reason]` - Deny a pending action
 
 ### Workflow
 
@@ -222,11 +292,11 @@ npm run lint         # Lint code
 
 **Autonomous Development:**
 ```
-1. /creategoal (define an objective)
+1. /goals create:quality (define an objective)
 2. /autonomous on (enable autonomous mode)
-3. /opportunities (see what can be improved)
-4. /approvals (review and approve actions)
-5. /transparency (review what was done)
+3. /intentions (see what's planned)
+4. /decisions (review and approve actions)
+5. /metrics (see what was accomplished)
 ```
 
 ## Configuration
