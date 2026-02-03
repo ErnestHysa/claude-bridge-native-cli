@@ -2,6 +2,25 @@
  * Utility functions for Claude Bridge Native CLI
  */
 
+import winston from 'winston';
+import winstonDailyRotateFile from 'winston-daily-rotate-file';
+import path from 'node:path';
+import { mkdirSync, existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
+// ES module equivalents for __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.dirname(__dirname);
+const BRAIN_DIR = path.join(PROJECT_ROOT, 'brain');
+const LOGS_DIR = path.join(BRAIN_DIR, 'logs');
+
+// Ensure logs directory exists
+if (!existsSync(LOGS_DIR)) {
+  mkdirSync(LOGS_DIR, { recursive: true });
+}
+
 /**
  * Sanitize a file path for safe display in error messages
  * Removes sensitive information while keeping the path recognizable
@@ -250,14 +269,128 @@ export function parseToolUse(output: string): {
   return { edits, errors };
 }
 
+// ============================================================================
+// Logging System - Winston-based persistent logging
+// ============================================================================
+
+/**
+ * Log levels
+ */
+export enum LogLevel {
+  ERROR = 'error',
+  WARN = 'warn',
+  INFO = 'info',
+  HTTP = 'http',
+  DEBUG = 'debug',
+  SILLY = 'silly',
+}
+
+/**
+ * Audit log entry structure
+ */
+export interface AuditLogEntry {
+  timestamp: string;
+  level: string;
+  action: string;
+  chatId?: number;
+  userId?: number;
+  projectPath?: string;
+  details: Record<string, unknown>;
+  result?: 'success' | 'failure' | 'pending';
+}
+
 /**
  * Logger class for consistent logging
+ * Wraps Winston for persistent file-based logging
  */
 export class Logger {
   private level: "debug" | "info" | "warn" | "error";
+  private winston: any = null;
+  private initialized = false;
 
   constructor(level: "debug" | "info" | "warn" | "error" = "info") {
     this.level = level;
+    // Initialize logging immediately
+    this.initWinston();
+  }
+
+  private initWinston(): void {
+    if (this.initialized) return;
+
+    try {
+      // Create Winston logger using imported modules
+      this.winston = winston.createLogger({
+        level: this.level,
+        format: winston.format.combine(
+          winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+          winston.format.errors({ stack: true }),
+          winston.format.json()
+        ),
+        defaultMeta: { service: 'claude-bridge' },
+        transports: [
+          // Console
+          new winston.transports.Console({
+            format: winston.format.combine(
+              winston.format.colorize({ all: true }),
+              winston.format.timestamp({ format: 'HH:mm:ss' }),
+              winston.format.printf((info: any) => {
+                const { timestamp, level, message, ...meta } = info;
+                let msg = `${timestamp} [${level}]: ${message}`;
+                if (Object.keys(meta).length > 0 && meta !== null && typeof meta === 'object') {
+                  const cleanMeta = { ...meta };
+                  delete cleanMeta.service;
+                  delete cleanMeta.level;
+                  delete cleanMeta.timestamp;
+                  if (Object.keys(cleanMeta).length > 0) {
+                    msg += ` ${JSON.stringify(cleanMeta)}`;
+                  }
+                }
+                return msg;
+              })
+            ),
+          }),
+          // App log (info+)
+          new winstonDailyRotateFile({
+            filename: path.join(LOGS_DIR, 'app-%DATE%.log'),
+            datePattern: 'YYYY-MM-DD',
+            maxSize: '20m',
+            maxFiles: '30d',
+            level: 'info',
+          }),
+          // Error log
+          new winstonDailyRotateFile({
+            filename: path.join(LOGS_DIR, 'error-%DATE%.log'),
+            datePattern: 'YYYY-MM-DD',
+            maxSize: '20m',
+            maxFiles: '90d',
+            level: 'error',
+          }),
+          // Audit log
+          new winstonDailyRotateFile({
+            filename: path.join(LOGS_DIR, 'audit-%DATE%.log'),
+            datePattern: 'YYYY-MM-DD',
+            maxSize: '20m',
+            maxFiles: '365d',
+            level: 'info',
+          }),
+        ],
+        exceptionHandlers: [
+          new winston.transports.File({
+            filename: path.join(LOGS_DIR, 'exceptions.log'),
+          }),
+        ],
+        rejectionHandlers: [
+          new winston.transports.File({
+            filename: path.join(LOGS_DIR, 'rejections.log'),
+          }),
+        ],
+      });
+
+      this.initialized = true;
+    } catch (error) {
+      console.error('[Logger] Failed to initialize Winston:', error);
+      this.initialized = true;
+    }
   }
 
   private shouldLog(level: "debug" | "info" | "warn" | "error"): boolean {
@@ -265,39 +398,152 @@ export class Logger {
     return levels[level] >= levels[this.level];
   }
 
-  private formatMessage(
-    level: string,
-    message: string,
-    meta?: Record<string, unknown>
-  ): string {
-    const timestamp = new Date().toISOString();
-    const metaStr = meta ? ` ${JSON.stringify(meta)}` : "";
-    return `[${timestamp}] ${level.toUpperCase()}: ${message}${metaStr}`;
-  }
-
   debug(message: string, meta?: Record<string, unknown>): void {
     if (this.shouldLog("debug")) {
-      console.debug(this.formatMessage("debug", message, meta));
+      if (this.winston) {
+        this.winston.debug(message, meta);
+      } else {
+        console.debug(`[${new Date().toISOString()}] DEBUG: ${message}`, meta || '');
+      }
     }
   }
 
   info(message: string, meta?: Record<string, unknown>): void {
     if (this.shouldLog("info")) {
-      console.info(this.formatMessage("info", message, meta));
+      if (this.winston) {
+        this.winston.info(message, meta);
+      } else {
+        console.info(`[${new Date().toISOString()}] INFO: ${message}`, meta || '');
+      }
     }
   }
 
   warn(message: string, meta?: Record<string, unknown>): void {
     if (this.shouldLog("warn")) {
-      console.warn(this.formatMessage("warn", message, meta));
+      if (this.winston) {
+        this.winston.warn(message, meta);
+      } else {
+        console.warn(`[${new Date().toISOString()}] WARN: ${message}`, meta || '');
+      }
     }
   }
 
   error(message: string, meta?: Record<string, unknown>): void {
     if (this.shouldLog("error")) {
-      console.error(this.formatMessage("error", message, meta));
+      if (this.winston) {
+        this.winston.error(message, meta);
+      } else {
+        console.error(`[${new Date().toISOString()}] ERROR: ${message}`, meta || '');
+      }
     }
   }
+}
+
+// Winston logging helper functions
+export function getLogsDir(): string {
+  return LOGS_DIR;
+}
+
+export async function getRecentLogs(
+  type: 'app' | 'error' | 'audit' = 'app',
+  limit = 50
+): Promise<string[]> {
+  const today = new Date().toISOString().split('T')[0];
+  const logPath = path.join(LOGS_DIR, `${type}-${today}.log`);
+
+  if (!existsSync(logPath)) {
+    return [];
+  }
+
+  try {
+    const content = await readFile(logPath, 'utf-8');
+    const lines = content.split('\n').filter((line: string) => line.trim());
+    return lines.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+export async function searchLogs(
+  query: string,
+  type: 'app' | 'error' | 'audit' = 'app',
+  days = 7
+): Promise<Array<{ date: string; line: string }>> {
+  const results: Array<{ date: string; line: string }> = [];
+
+  const files = readdirSync(LOGS_DIR)
+    .filter((f: string) => f.startsWith(`${type}-`) && f.endsWith('.log'))
+    .sort()
+    .slice(-days);
+
+  for (const file of files) {
+    const logPath = path.join(LOGS_DIR, file);
+    if (!existsSync(logPath)) continue;
+
+    try {
+      const content = await readFile(logPath, 'utf-8');
+      const lines = content.split('\n');
+      for (const line of lines) {
+        if (line.toLowerCase().includes(query.toLowerCase())) {
+          results.push({
+            date: file.slice(`${type}-`.length, -4),
+            line,
+          });
+        }
+      }
+    } catch {
+      // Skip files that can't be read
+    }
+  }
+
+  return results;
+}
+
+export async function getErrorLogs(limit = 50): Promise<string[]> {
+  return getRecentLogs('error', limit);
+}
+
+export async function getAuditLogs(limit = 100): Promise<string[]> {
+  return getRecentLogs('audit', limit);
+}
+
+export function logAudit(entry: AuditLogEntry): void {
+  const logger = new Logger('info');
+  logger.info('AUTONOMOUS_ACTION', {
+    ...entry,
+    audit: true,
+  });
+}
+
+export async function clearOldLogs(daysToKeep = 30): Promise<number> {
+  const cutoff = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
+  let cleared = 0;
+
+  try {
+    const files = readdirSync(LOGS_DIR);
+    for (const file of files) {
+      if (file === 'exceptions.log' || file === 'rejections.log') {
+        continue;
+      }
+
+      const filePath = path.join(LOGS_DIR, file);
+      if (!existsSync(filePath)) continue;
+
+      try {
+        const stats = statSync(filePath);
+        if (stats.mtimeMs < cutoff) {
+          unlinkSync(filePath);
+          cleared++;
+        }
+      } catch {
+        // Skip files that can't be accessed
+      }
+    }
+  } catch {
+    // Directory doesn't exist or can't be read
+  }
+
+  return cleared;
 }
 
 /**
