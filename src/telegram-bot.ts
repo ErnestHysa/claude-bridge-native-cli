@@ -230,6 +230,9 @@ export class TelegramBotHandler {
       this.handleGit(msg, match?.[1])
     );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
+    this.bot.onText(/\/logs(?:\s+(.+))?/, (msg, match) =>
+      this.handleLogs(msg, match?.[1])
+    );
     this.bot.onText(/\/profile(?:\s+(.+))?/, (msg, match) =>
       this.handleProfile(msg, match?.[1])
     );
@@ -237,6 +240,11 @@ export class TelegramBotHandler {
       this.handleSchedule(msg)
     );
     this.bot.onText(/\/schedules/, (msg) => this.handleSchedules(msg));
+
+    // State management commands
+    this.bot.onText(/\/state/, (msg) => this.handleState(msg));
+    this.bot.onText(/\/recovery/, (msg) => this.handleRecovery(msg));
+    this.bot.onText(/\/export/, (msg) => this.handleExport(msg));
 
     // Test watcher command
     this.bot.onText(/\/watch(?:\s+(.+))?/, (msg, match) =>
@@ -426,6 +434,7 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 /agent &lt;type&gt; &lt;task&gt; - Run specialized agent
 /git &lt;command&gt; - Git operations (commit, status, log)
 /metrics - Show daily metrics
+/logs [type] [lines] - View logs
 
 <b>Getting started:</b>
 1. Use /projects to see available projects
@@ -478,6 +487,10 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 /git status - Show git status
 /git log - Show recent commits
 /metrics - Show today's performance metrics
+/logs [type] [lines] - View logs (app/error/audit, default 20 lines)
+/state - View system state and checkpoints
+/recovery - View crash recovery status
+/export - Export state data to file
 /profile - View your profile
 /schedule &lt;cron&gt; &lt;task&gt; - Schedule a task
 /schedules - List scheduled tasks
@@ -1242,6 +1255,267 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     response += `Uptime: ${Math.floor(metrics.uptimeMs / 60000)}m\n`;
 
     await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+  }
+
+  /**
+   * Handle /logs command - View log files
+   * Usage: /logs [type] [lines]
+   * Types: app, error, audit (default: app)
+   * Lines: number of lines to show (default: 20)
+   */
+  private async handleLogs(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    // Parse arguments
+    let logType: 'app' | 'error' | 'audit' = 'app';
+    let lineCount = 20;
+
+    if (args) {
+      const parts = args.trim().split(/\s+/);
+      for (const part of parts) {
+        if (part === 'app' || part === 'error' || part === 'audit') {
+          logType = part;
+        } else if (/^\d+$/.test(part)) {
+          lineCount = Math.min(Math.max(parseInt(part, 10), 1), 100); // Limit 1-100
+        }
+      }
+    }
+
+    try {
+      // Import log functions
+      const { getRecentLogs, getLogsDir } = await import('./utils.js');
+
+      const logs = await getRecentLogs(logType, lineCount);
+
+      if (logs.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          `📋 No ${logType} logs found for today.\n\nLog directory: ${getLogsDir()}`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
+      // Build response
+      let response = `📋 <b>Recent ${logType.toUpperCase()} Logs</b> (${logs.length} lines):\n\n`;
+
+      // Show last N lines (most recent first)
+      const recentLogs = logs.slice(-lineCount).reverse();
+
+      for (const log of recentLogs) {
+        // Parse JSON log and format nicely
+        try {
+          const parsed = JSON.parse(log);
+          const timestamp = parsed.timestamp || parsed.time || '?';
+          const level = parsed.level || 'info';
+          const message = parsed.message || log;
+
+          // Truncate long messages
+          const truncatedMessage = message.length > 150 ? message.slice(0, 150) + '...' : message;
+
+          response += `<code>[${timestamp}] [${level.toUpperCase()}]</code> ${escapeHtml(truncatedMessage)}\n`;
+        } catch {
+          // Not JSON, just show as-is (truncated)
+          const truncated = log.length > 150 ? log.slice(0, 150) + '...' : log;
+          response += `<code>${escapeHtml(truncated)}</code>\n`;
+        }
+      }
+
+      // Split into chunks if too long
+      const chunks = this.chunkLogResponse(response);
+
+      for (const chunk of chunks) {
+        await this.bot.sendMessage(chatId, chunk, { parse_mode: "HTML" });
+      }
+    } catch (error) {
+      this.logger.error('Error fetching logs', { error });
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Error fetching logs: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Split a response into chunks to avoid Telegram message size limits
+   */
+  private chunkLogResponse(response: string, maxSize = 4000): string[] {
+    const chunks: string[] = [];
+    const lines = response.split('\n');
+    let currentChunk = '';
+
+    for (const line of lines) {
+      const testChunk = currentChunk + (currentChunk ? '\n' : '') + line;
+
+      if (testChunk.length > maxSize) {
+        if (currentChunk) {
+          chunks.push(currentChunk);
+        }
+        currentChunk = line;
+
+        // If a single line is too long, split it
+        while (currentChunk.length > maxSize) {
+          chunks.push(currentChunk.slice(0, maxSize));
+          currentChunk = currentChunk.slice(maxSize);
+        }
+      } else {
+        currentChunk = testChunk;
+      }
+    }
+
+    if (currentChunk) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks;
+  }
+
+  /**
+   * Handle /state command - View system state and checkpoints
+   */
+  private async handleState(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    try {
+      // Get checkpoint info
+      const { getCheckpointManager } = await import('./brain/checkpoint/index.js');
+      const checkpointMgr = getCheckpointManager();
+      const checkpointInfo = await checkpointMgr.getCheckpointInfo();
+
+      // Get database stats
+      const { getDatabaseManager } = await import('./brain/database/index.js');
+      const dbMgr = getDatabaseManager();
+      const dbStats = dbMgr.getStats();
+
+      // Get metrics
+      const { getBrain } = await import('./brain/brain-manager.js');
+      const metrics = await getBrain().getTodayMetrics();
+
+      let response = `📊 <b>System State</b>\n\n`;
+
+      response += `<b>📁 Checkpoints:</b> ${checkpointInfo.count}\n`;
+      if (checkpointInfo.lastCheckpointAge !== null) {
+        const age = Math.floor(checkpointInfo.lastCheckpointAge / 1000);
+        response += `Last: ${age}s ago\n`;
+      }
+
+      response += `<b>🗄️ Database:</b>\n`;
+      response += `  Sessions: ${dbStats.sessionsCount}\n`;
+      response += `  Tasks: ${dbStats.tasksCount}\n`;
+      response += `  Audit logs: ${dbStats.auditCount}\n`;
+      response += `  Decisions: ${dbStats.decisionsCount}\n`;
+      response += `  Size: ${(dbStats.dbSize / 1024).toFixed(1)} KB\n`;
+
+      response += `<b>📈 Metrics (Today):</b>\n`;
+      response += `  Tasks: ${metrics.tasksCompleted} done, ${metrics.tasksFailed} failed\n`;
+      response += `  Queries: ${metrics.claudeQueries}\n`;
+      response += `  Files: ${metrics.filesModified} modified\n`;
+      response += `  Uptime: ${Math.floor(metrics.uptimeMs / 60000)}m\n`;
+
+      await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+    } catch (error) {
+      this.logger.error('Error fetching state', { error });
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Error fetching state: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Handle /recovery command - View crash recovery info
+   */
+  private async handleRecovery(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    try {
+      const { getRecoveryManager } = await import('./brain/recovery/index.js');
+      const recoveryMgr = getRecoveryManager();
+      const info = await recoveryMgr.getRecoveryInfo();
+
+      let response = `🔄 <b>Recovery Status</b>\n\n`;
+
+      if (info.lastHeartbeat) {
+        response += `<b>Current Heartbeat:</b>\n`;
+        response += `  PID: ${info.lastHeartbeat.pid}\n`;
+        response += `  Status: ${info.lastHeartbeat.status}\n`;
+        response += `  Uptime: ${Math.floor(info.lastHeartbeat.uptime / 1000)}s\n`;
+        response += `  Active sessions: ${info.lastHeartbeat.activeSessions}\n`;
+        response += `  Active tasks: ${info.lastHeartbeat.activeTasks}\n`;
+      } else {
+        response += `<b>Heartbeat:</b> Not active\n`;
+      }
+
+      if (info.hasUncleanShutdown) {
+        response += `\n⚠️ <b>Unclean shutdown detected!</b>\n`;
+        response += `Time since heartbeat: ${Math.floor((info.timeSinceHeartbeat || 0) / 1000)}s\n`;
+      }
+
+      response += `\n<b>Crash Reports:</b> ${info.crashReports.length}\n`;
+      if (info.crashReports.length > 0) {
+        response += `Recent crashes:\n`;
+        for (const crash of info.crashReports.slice(0, 3)) {
+          const date = new Date(crash.timestamp).toLocaleString();
+          response += `  • ${date} - ${crash.crashReason}\n`;
+        }
+      }
+
+      await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+    } catch (error) {
+      this.logger.error('Error fetching recovery info', { error });
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Error fetching recovery info: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Handle /export command - Export state data
+   */
+  private async handleExport(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+
+    try {
+      const { getDatabaseManager } = await import('./brain/database/index.js');
+      const dbMgr = getDatabaseManager();
+
+      const jsonData = dbMgr.exportToJson();
+
+      // Save to file
+      const { writeFile } = await import('node:fs/promises');
+      const { join } = await import('node:path');
+      const exportPath = join(process.cwd(), 'brain', `export-${Date.now()}.json`);
+
+      await writeFile(exportPath, jsonData, 'utf-8');
+
+      await this.bot.sendMessage(
+        chatId,
+        `📤 State exported to:\n${escapeHtml(exportPath)}\n\nSize: ${(jsonData.length / 1024).toFixed(1)} KB`
+      );
+    } catch (error) {
+      this.logger.error('Error exporting state', { error });
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Error exporting state: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   /**
@@ -2666,6 +2940,17 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       this.logger.debug(`  Duration: ${result.duration}ms`);
       this.logger.debug(`  Exit code: ${result.exitCode}`);
       this.logger.debug(`  Output size: ${result.output.length} chars`);
+
+      // Track metrics
+      try {
+        const { getBrain } = await import('./brain/brain-manager.js');
+        getBrain().trackMetrics({
+          claudeQueries: 1,
+          activeProject: session.currentProject?.name
+        });
+      } catch {
+        // Metrics tracking is optional
+      }
 
       // Delete the status message
       try {
