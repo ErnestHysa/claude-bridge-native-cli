@@ -20,9 +20,11 @@
 import { getMemoryStore } from '../memory/memory-store.js';
 import { getGoalSystem } from '../goals/goal-system.js';
 import { getIntentionEngine } from '../intention/intention-engine.js';
+import { getOpportunityDetector } from '../opportunity/opportunity-detector.js';
 import type { TaskPriority } from '../types.js';
 import type { Goal } from '../goals/goal-system.js';
 import type { Intention, IntentionFilter } from '../intention/intention-engine.js';
+import type { ImprovementOpportunity } from '../opportunity/opportunity-detector.js';
 
 // ===========================================
 // Night Work Task
@@ -650,11 +652,139 @@ export class NightWorkQueue {
 
   /**
    * Sync tasks from opportunities
-   * TODO: Implement full integration with opportunity detector
+   * Creates night work tasks for detected improvement opportunities
    */
   private async syncFromOpportunities(_chatId?: number): Promise<number> {
-    // Stub - will be implemented when opportunity detector integration is ready
-    return 0;
+    try {
+      const opportunityDetector = getOpportunityDetector();
+
+      // Get opportunities with 'detected' status
+      const opportunities = await opportunityDetector.getOpportunities({
+        status: 'detected',
+      });
+
+      let addedCount = 0;
+
+      for (const opportunity of opportunities) {
+        // Skip if opportunity can't be auto-applied with high impact
+        if (!opportunity.canAutoApply && opportunity.estimatedImpact > 0.3) continue;
+
+        // Check if a task for this opportunity already exists in queue
+        const existingTasks = Array.from(this.state.tasks.values())
+          .filter(t => t.source === 'opportunity' && t.sourceId === opportunity.id);
+
+        const hasActiveTask = existingTasks.some(t =>
+          ['pending', 'scheduled', 'ready', 'running'].includes(t.status)
+        );
+
+        if (hasActiveTask) continue;
+
+        // Map opportunity type to night work task type
+        const taskType = this.mapOpportunityToTaskType(opportunity);
+
+        // Map opportunity priority to task priority
+        const priority = this.mapOpportunityPriority(opportunity.priority);
+
+        // Determine required permission based on opportunity properties
+        const requiredPermission = this.getOpportunityPermissionLevel(opportunity);
+
+        // For opportunities, chatId is inferred from context (system tasks)
+        const taskChatId = 0;
+
+        // Create the task
+        const task: Omit<NightWorkTask, 'id' | 'createdAt' | 'retryCount' | 'status'> = {
+          type: taskType,
+          priority,
+          title: opportunity.title,
+          description: opportunity.description,
+          source: 'opportunity',
+          sourceId: opportunity.id,
+          chatId: taskChatId,
+          requiredPermission,
+          context: {
+            projectId: opportunity.projectPath,
+            metadata: {
+              opportunityType: opportunity.type,
+              estimatedImpact: opportunity.estimatedImpact,
+              estimatedEffort: opportunity.estimatedEffort,
+              canAutoApply: opportunity.canAutoApply,
+              filePath: opportunity.filePath,
+            },
+          },
+          maxRetries: opportunity.priority === 'critical' ? 1 : 2,
+          estimatedDuration: Math.floor((opportunity.estimatedEffort || 1) * 30 * 60 * 1000),
+        };
+
+        await this.addTask(task);
+        addedCount++;
+      }
+
+      return addedCount;
+    } catch (error) {
+      console.error('Error syncing from opportunities:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Map opportunity type to night work task type
+   */
+  private mapOpportunityToTaskType(opportunity: ImprovementOpportunity): NightWorkTaskType {
+    const typeMap: Record<string, NightWorkTaskType> = {
+      refactoring: 'refactoring',
+      complexity: 'refactoring',
+      duplication: 'refactoring',
+      test_coverage: 'test_fix',
+      dependency_update: 'dependency_update',
+      documentation: 'documentation',
+      performance: 'custom',
+      security: 'custom',
+    };
+
+    return typeMap[opportunity.type] || 'custom';
+  }
+
+  /**
+   * Map opportunity priority to task priority
+   */
+  private mapOpportunityPriority(priority: string): 'urgent' | 'high' | 'medium' | 'low' {
+    if (priority === 'critical') return 'urgent';
+    if (priority === 'high') return 'high';
+    if (priority === 'low') return 'low';
+    return 'medium';
+  }
+
+  /**
+   * Determine permission level required for an opportunity-based task
+   */
+  private getOpportunityPermissionLevel(opportunity: ImprovementOpportunity): NightWorkTask['requiredPermission'] {
+    // Critical opportunities always need supervision
+    if (opportunity.priority === 'critical') {
+      return 'supervised';
+    }
+
+    // High impact needs supervision
+    if (opportunity.estimatedImpact > 0.5) {
+      return 'supervised';
+    }
+
+    // Safe opportunities can be autonomous
+    if (opportunity.canAutoApply && opportunity.estimatedImpact <= 0.3) {
+      switch (opportunity.type) {
+        case 'documentation':
+          return 'autonomous';
+        case 'test_coverage':
+          return 'autonomous';
+        case 'refactoring':
+        case 'complexity':
+        case 'duplication':
+          return 'supervised';
+        default:
+          return 'supervised';
+      }
+    }
+
+    return 'supervised';
   }
 
   /**
