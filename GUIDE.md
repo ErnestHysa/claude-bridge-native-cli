@@ -306,35 +306,79 @@ Shows recent mistakes logged by the AI and how it's learning from them.
 
 ---
 
-## Autonomous AI Commands 🤖
+## System & Persistence Commands 💾
 
-### `/goals`
-List all active goals.
+### `/logs [type] [lines]`
+View recent logs from the system.
 
-**Shows:** Goal ID, title, progress, status, and target metrics.
+**Examples:**
+```
+/logs              → Last 50 app logs
+/logs error        → Last 50 error logs
+/logs audit 100    → Last 100 audit logs
+/logs app 20       → Last 20 app logs
+```
 
-**When to use:** See what objectives you've set for the AI to work on.
+**Log Types:**
+- `app` - General application logs
+- `error` - Error-only logs
+- `audit` - Action audit trail
+
+**When to use:** Debug issues, review system activity, check for errors.
 
 ---
 
-### `/goal <id>`
-View goal details and progress.
-
-**Example:** `/goal goal-123456`
+### `/state`
+View current system state and persistence status.
 
 **Shows:**
-- Goal description and requirements
-- Current progress vs target
-- Associated tasks
-- Permissions and strategy
-- Blockers
+- Checkpoint information (last checkpoint, count, size)
+- Database statistics (sessions, tasks, decisions)
+- Metrics summary (today's activity)
+- System uptime
+
+**When to use:** Check what data is persisted, verify system health.
 
 ---
 
-### `/creategoal`
-Create a new goal interactively.
+### `/recovery`
+View recovery and crash detection information.
 
-**When to use:** When you want the AI to autonomously work toward an objective.
+**Shows:**
+- Whether unclean shutdown was detected
+- Last heartbeat information
+- Crash reports (if any)
+- Recovery actions taken
+
+**When to use:** After a restart to see if there was a crash, review crash reports.
+
+---
+
+### `/export [format]`
+Export data from the system.
+
+**Examples:**
+```
+/export            → Export as JSON
+/export csv        → Export as CSV
+```
+
+**When to use:** Backup data, analyze metrics externally, migrate data.
+
+---
+
+## Autonomous AI Commands 🤖
+
+### `/goals [action]`
+Manage goals - list, create, or complete.
+
+**Examples:**
+```
+/goals              → List all goals
+/goals list         → List with details
+/goals create:quality → Create a quality goal
+/goals complete:goal-123 → Mark goal as complete
+```
 
 **Goal Types:**
 - `quality` - Test coverage, complexity reduction
@@ -342,30 +386,22 @@ Create a new goal interactively.
 - `maintenance` - Reduce tech debt, update dependencies
 - `learning` - Understand codebase, document patterns
 
-**Strategy Options:**
-- `autonomous` - AI works without asking
-- `supervised` - AI asks for approval
-- `manual` - AI suggests, you execute
+**When to use:** Create and track objectives for autonomous work.
 
 ---
 
-### `/opportunities`
-List detected improvement opportunities.
+### `/intentions [filter]`
+View active intentions (planned actions).
 
-**Shows:**
-- Type (refactoring, test_coverage, dependency_update, etc.)
-- Priority and estimated effort
-- Suggested action
-- Whether it can be auto-applied
+**Examples:**
+```
+/intentions         → List all intentions
+/intentions active  → Show only active
+/intentions high    → Show high priority only
+/intentions clear   → Clear expired intentions
+```
 
-**When to use:** See what improvements the AI has detected.
-
----
-
-### `/scan`
-Run opportunity detection scan.
-
-**When to use:** After making significant changes to find new improvement opportunities.
+**When to use:** See what the AI is planning to work on.
 
 ---
 
@@ -382,8 +418,31 @@ Toggle autonomous mode.
 
 ---
 
-### `/decisions`
+### `/permissions [level]`
+View or set permission level.
+
+**Examples:**
+```
+/permissions              → View current level
+/permissions supervised   → Set to supervised mode
+/permissions autonomous   → Set to autonomous mode
+```
+
+**Levels:** `read_only`, `advisory`, `supervised`, `autonomous`, `full`
+
+**When to use:** Control what actions the AI can take without approval.
+
+---
+
+### `/decisions [filter]`
 View recent autonomous decisions.
+
+**Examples:**
+```
+/decisions          → All recent decisions
+/decisions pending  → Only pending approval
+/decisions today    → Today's decisions only
+```
 
 **Shows:**
 - Decision ID and type
@@ -395,29 +454,21 @@ View recent autonomous decisions.
 
 ---
 
-### `/transparency`
-View autonomous action log.
+### `/approve <id>`
+Approve a pending action or decision.
 
-**Shows:**
-- All autonomous actions taken
-- Approval status
-- Changes made
-- Outcomes
+**Example:** `/approve decision-123`
 
-**When to use:** Get full visibility into autonomous AI activity.
+**When to use:** Approve autonomous actions that require your consent.
 
 ---
 
-### `/approvals`
-View pending approval requests.
+### `/deny <id> [reason]`
+Deny a pending action or decision.
 
-**Shows:**
-- Actions requiring approval
-- Risk level
-- Description and reasoning
-- Files affected
+**Example:** `/deny decision-456 Too risky right now`
 
-**When to use:** Review and approve/deny autonomous actions.
+**When to use:** Reject autonomous actions you don't want.
 
 ---
 
@@ -462,21 +513,20 @@ View pending approval requests.
 
 ### Autonomous Development
 ```
-1. /creategoal (define an objective)
-2. /autonomous on (enable autonomous mode)
-3. /opportunities (see what can be improved)
-4. /approvals (review and approve actions)
-5. /transparency (review what was done)
+1. /goals create:quality (define an objective)
+2. /permissions supervised (set permission level)
+3. /autonomous on (enable autonomous mode)
+4. /intentions (see what's planned)
+5. /decisions (review and approve actions)
 ```
 
 ### Setting Up Autonomous Goals
 ```
-1. /creategoal
-2. Choose type (quality/feature/maintenance/learning)
-3. Set target metrics
-4. Choose strategy (autonomous/supervised/manual)
-5. Configure permissions
-6. AI works toward goal automatically
+1. /goals create:quality Increase test coverage
+2. /permissions autonomous (set permission level)
+3. /autonomous on (enable autonomous mode)
+4. AI works toward goal automatically
+5. /decisions (review what was done)
 ```
 
 ---
@@ -486,13 +536,14 @@ View pending approval requests.
 | Category | Commands |
 |----------|----------|
 | **Core** | `/start`, `/projects`, `/select`, `/addproject`, `/rmproject`, `/rescan`, `/status`, `/cancel`, `/help` |
-| **Memory** | `/remember`, `/recall`, `/context` |
+| **Memory** | `/remember`, `/recall`, `/context`, `/semantic` |
 | **Code Search** | `/index`, `/search`, `/file` |
 | **Tasks** | `/task`, `/tasks`, `/agent`, `/agents` |
 | **Git** | `/git commit`, `/git status`, `/git log`, `/git pr` |
 | **Info** | `/metrics`, `/profile`, `/schedule`, `/schedules` |
-| **Self-Improvement** | `/heartbeat`, `/briefing`, `/checks`, `/selfreview` |
-| **Autonomous AI** | `/goals`, `/goal`, `/creategoal`, `/opportunities`, `/scan`, `/autonomous`, `/decisions`, `/transparency`, `/approvals` |
+| **Self-Improvement** | `/watch`, `/notifications`, `/analyze`, `/learn`, `/heartbeat`, `/briefing`, `/checks`, `/selfreview` |
+| **System & Persistence** | `/logs`, `/state`, `/recovery`, `/export` |
+| **Autonomous AI** | `/goals`, `/intentions`, `/autonomous`, `/permissions`, `/decisions`, `/approve`, `/deny` |
 
 ---
 
@@ -504,10 +555,10 @@ View pending approval requests.
 4. **Use `/agent scout`** to explore unfamiliar codebases
 5. **Use `/git commit`** for smart, descriptive commit messages
 6. **Enable `/autonomous on`** to let the AI take initiative on improvements
-7. **Set goals with `/creategoal`** to guide autonomous work
-8. **Check `/approvals`** regularly to review autonomous actions
-9. **Use `/scan`** after major changes to find improvement opportunities
-10. **Review `/transparency`** to see all autonomous AI activity
+7. **Set goals with `/goals create:quality`** to guide autonomous work
+8. **Check `/decisions`** regularly to review autonomous actions
+9. **Use `/intentions`** to see what the AI is planning
+10. **Review `/permissions`** to control what the AI can do autonomously
 
 ---
 
