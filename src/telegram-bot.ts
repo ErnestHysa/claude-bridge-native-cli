@@ -24,6 +24,7 @@ import {
   getDocWriter,
   getDependencyManager,
   getFeatureWorkflow,
+  getRefactoringAgent,
   startScheduledJobs,
   loadSelfReviewContext,
   getTestWatcher,
@@ -253,6 +254,9 @@ export class TelegramBotHandler {
     );
     this.bot.onText(/\/feature(?:\s+(.+))?/, (msg, match) =>
       this.handleFeature(msg, match?.[1])
+    );
+    this.bot.onText(/\/refactor(?:\s+(.+))?/, (msg, match) =>
+      this.handleRefactor(msg, match?.[1])
     );
     this.bot.onText(/\/metrics/, (msg) => this.handleMetrics(msg));
     this.bot.onText(/\/logs(?:\s+(.+))?/, (msg, match) =>
@@ -2441,6 +2445,289 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       }
     } catch (error) {
       this.logger.error('Feature command error', { error, command, args });
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} Error: ${error instanceof Error ? escapeHtml(error.message) : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Handle /refactor command - Code refactoring automation
+   * Usage:
+   *   /refactor - Show help and scan summary
+   *   /refactor scan - Scan for refactoring opportunities
+   *   /refactor opportunities - List detected opportunities
+   *   /refactor apply <id> - Apply a specific refactoring
+   *   /refactor auto --safe - Apply all safe refactorings
+   *   /refactor policy - Show refactoring policy
+   */
+  private async handleRefactor(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+    const session = this.sessionManager.getSession(chatId);
+
+    // Get refactoring agent
+    const refactorAgent = getRefactoringAgent();
+
+    // Show help if no arguments
+    if (!args) {
+      let help = `${getBrain().getEmoji()} <b>Code Refactoring</b>\n\n`;
+      help += `<b>Available commands:</b>\n\n`;
+      help += `<code>/refactor</code> - Show this help\n`;
+      help += `<code>/refactor scan</code> - Scan for opportunities\n`;
+      help += `<code>/refactor opportunities</code> - List opportunities\n`;
+      help += `<code>/refactor apply [id]</code> - Apply refactoring\n`;
+      help += `<code>/refactor auto --safe</code> - Apply safe refactorings\n`;
+      help += `<code>/refactor policy</code> - Show policy\n\n`;
+
+      if (session?.currentProject) {
+        help += `<b>Current project:</b> ${escapeHtml(session.currentProject.name)}\n`;
+      } else {
+        help += `<i>No project selected. Use /select first.</i>\n`;
+      }
+
+      await this.bot.sendMessage(chatId, help, { parse_mode: "HTML" });
+      return;
+    }
+
+    // Check if project is selected
+    if (!session?.currentProject) {
+      await this.bot.sendMessage(
+        chatId,
+        `${getBrain().getEmoji()} No project selected.\n\nPlease select a project with /select first.`
+      );
+      return;
+    }
+
+    const projectPath = session.currentProject.path;
+    const [command, ...rest] = args.split(' ');
+    const target = rest.join(' ');
+
+    try {
+      switch (command.toLowerCase()) {
+        case 'scan': {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Scanning for refactoring opportunities...`
+          );
+
+          const opportunities = await refactorAgent.scanProject(projectPath);
+
+          if (opportunities.length === 0) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} ✅ No refactoring opportunities found!\n\nYour code looks clean.`
+            );
+            return;
+          }
+
+          let report = `${getBrain().getEmoji()} <b>Refactoring Scan Results</b>\n\n`;
+          report += `Found ${opportunities.length} opportunities:\n\n`;
+
+          // Group by type
+          const byType: Record<string, typeof opportunities> = {};
+          for (const opp of opportunities) {
+            if (!byType[opp.type]) byType[opp.type] = [];
+            byType[opp.type].push(opp);
+          }
+
+          for (const [type, items] of Object.entries(byType)) {
+            report += `<b>${type.replace(/_/g, ' ').toUpperCase()}</b>: ${items.length}\n`;
+          }
+
+          report += '\n';
+          report += `<b>Top Opportunities:</b>\n\n`;
+          for (const opp of opportunities.slice(0, 10)) {
+            const riskIcon = opp.risk === 'safe' ? '✅' : opp.risk === 'low' ? '🟢' : opp.risk === 'medium' ? '🟡' : '🔴';
+            report += `${riskIcon} <code>${opp.id.slice(-6)}</code> ${escapeHtml(opp.type)}\n`;
+            report += `   ${escapeHtml(opp.description)}\n`;
+            report += `   ${basename(opp.filePath)}:${opp.lineNumber || '?'}\n`;
+            report += `   Confidence: ${Math.round(opp.confidence * 100)}%\n\n`;
+          }
+
+          if (opportunities.length > 10) {
+            report += `... and ${opportunities.length - 10} more\n`;
+          }
+
+          report += `\nUse <code>/refactor apply [id]</code> to apply a specific refactoring.`;
+
+          await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          break;
+        }
+
+        case 'opportunities': {
+          const opportunities = await refactorAgent.getOpportunities(projectPath);
+
+          if (opportunities.length === 0) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} No opportunities found.\n\nRun <code>/refactor scan</code> to scan your code.`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          let report = `${getBrain().getEmoji()} <b>Refactoring Opportunities</b> (${opportunities.length})\n\n`;
+
+          for (const opp of opportunities.slice(0, 20)) {
+            const riskIcon = opp.risk === 'safe' ? '✅' : opp.risk === 'low' ? '🟢' : opp.risk === 'medium' ? '🟡' : '🔴';
+            report += `${riskIcon} <b>${escapeHtml(opp.type)}</b>\n`;
+            report += `   ID: <code>${opp.id.slice(-8)}</code>\n`;
+            report += `   ${escapeHtml(opp.description)}\n`;
+            report += `   File: ${escapeHtml(basename(opp.filePath))}\n`;
+            report += `   Risk: ${opp.risk} | Complexity: ${opp.complexity}\n\n`;
+          }
+
+          if (opportunities.length > 20) {
+            report += `... and ${opportunities.length - 20} more\n`;
+          }
+
+          await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          break;
+        }
+
+        case 'apply': {
+          if (!target) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/refactor apply [id]</code>`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Applying refactoring...`
+          );
+
+          const result = await refactorAgent.refactor(target);
+
+          if (!result) {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} ❌ Refactoring not found or already in progress.`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+
+          if (result.success) {
+            let report = `${getBrain().getEmoji()} ✅ Refactoring applied!\n\n`;
+            report += `Changes made:\n`;
+            for (const change of result.changes) {
+              report += `• ${escapeHtml(change.description)}\n`;
+            }
+            report += `\nTests: ${result.testsPassed ? '✅ Passed' : '⚠️ Failed'}\n`;
+            report += `Duration: ${result.duration}ms\n`;
+            if (result.rollbackPerformed) {
+              report += `⚠️ Rollback was performed due to issues.\n`;
+            }
+
+            await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          } else {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} ❌ Refactoring failed!\n\n${result.errorMessage ? escapeHtml(result.errorMessage) : 'Unknown error'}`,
+              { parse_mode: "HTML" }
+            );
+          }
+          break;
+        }
+
+        case 'auto': {
+          if (target === '--safe') {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Applying safe refactorings...`
+            );
+
+            // Get safe opportunities and apply them
+            const opportunities = refactorAgent.getOpportunities(projectPath);
+            const safeOpportunities = opportunities.filter(o => o.risk === 'safe' || o.risk === 'low');
+
+            if (safeOpportunities.length === 0) {
+              await this.bot.sendMessage(
+                chatId,
+                `${getBrain().getEmoji()} No safe refactorings found.\n\nRun <code>/refactor scan</code> to find opportunities.`,
+                { parse_mode: "HTML" }
+              );
+              return;
+            }
+
+            const results: Array<NonNullable<Awaited<ReturnType<typeof refactorAgent.refactor>>>> = [];
+            for (const opp of safeOpportunities.slice(0, 10)) {
+              const result = await refactorAgent.refactor(opp.id);
+              if (result) results.push(result);
+            }
+
+            const successful = results.filter(r => r.success);
+            const failed = results.filter(r => !r.success);
+
+            let report = `${getBrain().getEmoji()} <b>Auto-Refactoring Complete</b>\n\n`;
+            report += `Applied: ${successful.length}\n`;
+            report += `Failed: ${failed.length}\n\n`;
+
+            if (successful.length > 0) {
+              report += `<b>Successful refactorings:</b>\n`;
+              for (const result of successful.slice(0, 5)) {
+                report += `✅ ${result.changes[0]?.description || 'Refactoring'}\n`;
+              }
+              if (successful.length > 5) {
+                report += `   ... and ${successful.length - 5} more\n`;
+              }
+            }
+
+            if (failed.length > 0) {
+              report += `\n<b>Failed:</b>\n`;
+              for (const result of failed.slice(0, 3)) {
+                report += `❌ ${result.errorMessage || 'Unknown error'}\n`;
+              }
+            }
+
+            await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          } else {
+            await this.bot.sendMessage(
+              chatId,
+              `${getBrain().getEmoji()} Usage: <code>/refactor auto --safe</code>`,
+              { parse_mode: "HTML" }
+            );
+          }
+          break;
+        }
+
+        case 'policy': {
+          const policy = await refactorAgent.getPolicy(projectPath);
+
+          let report = `${getBrain().getEmoji()} <b>Refactoring Policy</b>\n\n`;
+          report += `<b>Automation:</b>\n`;
+          report += `• Auto-refactor safe: ${policy.autoRefactorSafe ? '✅' : '❌'}\n`;
+          report += `• Auto-refactor low-risk: ${policy.autoRefactorLow ? '✅' : '❌'}\n`;
+          report += `• Require approval (moderate): ${policy.requireApprovalModerate ? '✅' : '❌'}\n`;
+          report += `• Require approval (complex): ${policy.requireApprovalComplex ? '✅' : '❌'}\n\n`;
+
+          report += `<b>Thresholds:</b>\n`;
+          report += `• Max functions per file: ${policy.maxFunctionsPerFile}\n`;
+          report += `• Max complexity: ${policy.maxComplexity}\n`;
+          report += `• Max duplication: ${policy.maxDuplication}%\n`;
+
+          await this.bot.sendMessage(chatId, report, { parse_mode: "HTML" });
+          break;
+        }
+
+        default:
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} Unknown command: <code>${escapeHtml(command)}</code>\n\nUse /refactor for help.`,
+            { parse_mode: "HTML" }
+          );
+      }
+    } catch (error) {
+      this.logger.error('Refactor command error', { error, command, args });
       await this.bot.sendMessage(
         chatId,
         `${getBrain().getEmoji()} Error: ${error instanceof Error ? escapeHtml(error.message) : 'Unknown error'}`
