@@ -156,6 +156,14 @@ export class TaskQueue {
       this.state.pending.push(task);
     }
 
+    // Track metrics
+    const { getMetricsTracker } = await import('../metrics/index.js');
+    if (status === 'completed') {
+      getMetricsTracker().increment({ tasksCompleted: 1 });
+    } else if (status === 'failed') {
+      getMetricsTracker().increment({ tasksFailed: 1 });
+    }
+
     await this.saveState();
     return true;
   }
