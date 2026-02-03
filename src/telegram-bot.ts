@@ -29,6 +29,7 @@ import {
   type SetupWizard,
   type AgentType,
   type NotificationType,
+  type Task,
 } from "./brain/index.js";
 
 // Worker imports for self-improvement system
@@ -958,17 +959,30 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     const isBackground = args.includes("--bg");
     const description = args.replace("--bg", "").trim();
 
-    // Store task in memory
-    await getBrain().remember(`task_${Date.now()}`, {
+    // Get current session for project info
+    const session = this.sessionManager.getSession(chatId);
+    const projectId = session?.currentProject?.name || 'default';
+
+    // Add to TaskQueue
+    const { getTaskQueue } = await import('./brain/tasks/task-queue.js');
+    const taskQueue = getTaskQueue();
+
+    const taskId = await taskQueue.addTask({
+      type: 'claude_query',
+      title: description.substring(0, 50),
       description,
+      status: 'pending',
+      priority: 'medium',
+      projectId,
       chatId,
-      background: isBackground,
-      status: "pending",
+      metadata: {
+        background: isBackground,
+      },
     });
 
     await this.bot.sendMessage(
       chatId,
-      `${getBrain().getEmoji()} Task created: <b>${escapeHtml(description)}</b>${isBackground ? " (background)" : ""}`,
+      `${getBrain().getEmoji()} Task created: <b>${escapeHtml(taskId)}</b>\n\n${escapeHtml(description)}${isBackground ? " (background)" : ""}`,
       { parse_mode: "HTML" }
     );
   }
@@ -984,26 +998,35 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     await ensureBrainInitialized();
     const chatId = msg.chat.id;
 
-    // Search for tasks belonging to this chat
-    const results = await getBrain().searchFacts(`task_${chatId}`);
+    // Get tasks from TaskQueue
+    const { getTaskQueue } = await import('./brain/tasks/task-queue.js');
+    const taskQueue = getTaskQueue();
 
-    const userTasks = results.filter(r => {
-      const val = r.value as Record<string, unknown>;
-      return (val.status as string) === "pending";
-    });
+    const userTasks = taskQueue.getTasksForChat(chatId);
+    const activeTasks = userTasks.filter(t => t.status === 'pending' || t.status === 'running');
 
-    if (userTasks.length === 0) {
-      await this.bot.sendMessage(
-        chatId,
-        `${getBrain().getEmoji()} No active tasks.`
-      );
+    if (activeTasks.length === 0) {
+      // Show completed/failed count if there are any
+      const completedCount = userTasks.filter(t => t.status === 'completed').length;
+      const failedCount = userTasks.filter(t => t.status === 'failed').length;
+
+      let message = `${getBrain().getEmoji()} No active tasks.`;
+      if (completedCount > 0 || failedCount > 0) {
+        message += `\n\nCompleted: ${completedCount} | Failed: ${failedCount}`;
+      }
+      await this.bot.sendMessage(chatId, message);
       return;
     }
 
-    let response = `${getBrain().getEmoji()} <b>Active Tasks (${userTasks.length}):</b>\n\n`;
-    for (const task of userTasks) {
-      const val = task.value as Record<string, unknown>;
-      response += `• <code>${task.key.slice(-8)}</code> ${escapeHtml(String(val.description))}\n`;
+    let response = `${getBrain().getEmoji()} <b>Active Tasks (${activeTasks.length}):</b>\n\n`;
+
+    for (const task of activeTasks) {
+      const statusEmoji = task.status === 'running' ? '🔄' : '⏳';
+      response += `${statusEmoji} <code>${task.id.slice(-8)}</code> ${escapeHtml(task.title)}\n`;
+      if (task.status === 'running' && task.startedAt) {
+        const elapsed = Math.floor((Date.now() - task.startedAt) / 1000);
+        response += `   Running for ${elapsed}s\n`;
+      }
     }
 
     await this.bot.sendMessage(chatId, response, { parse_mode: "HTML" });
@@ -1202,26 +1225,103 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 
     const subCommand = args.split(" ")[0];
 
+    // Import Git automation
+    const { getGitAutomation } = await import('./brain/git/git-automation.js');
+    const gitAutomation = getGitAutomation();
+
     switch (subCommand) {
-      case "commit":
+      case "commit": {
         await this.bot.sendMessage(
           chatId,
-          `${getBrain().getEmoji()} Creating smart commit...\n\nThis feature will analyze your changes and generate an appropriate commit message.`
+          `${getBrain().getEmoji()} Creating smart commit...`
         );
-        break;
-      case "status":
-        await this.bot.sendMessage(
-          chatId,
-          `${getBrain().getEmoji()} Git status for <b>${escapeHtml(session.currentProject.name)}</b>:\n\nBranch: ${session.currentProject.branch || "main"}\nStatus: ${session.currentProject.status || "unknown"}`,
-          { parse_mode: "HTML" }
+
+        // Check for --push flag
+        const shouldPush = args.includes('--push');
+
+        const result = await gitAutomation.smartCommit(
+          session.currentProject.path,
+          { autoStage: true, push: shouldPush }
         );
+
+        if (result.success) {
+          let message = `${getBrain().getEmoji()} <b>Commit successful!</b>\n\n`;
+          message += `<b>Hash:</b> ${result.commitHash?.substring(0, 8) || 'unknown'}\n`;
+          message += `<b>Message:</b> ${escapeHtml(result.message || '')}`;
+
+          if (shouldPush) {
+            message += `\n\n✅ Pushed to remote`;
+          }
+
+          await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+
+          // Track metrics
+          getBrain().trackMetrics({ filesModified: 1 });
+        } else {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} <b>Commit failed</b>\n\n${escapeHtml(result.error || 'Unknown error')}`,
+            { parse_mode: "HTML" }
+          );
+        }
         break;
-      case "log":
-        await this.bot.sendMessage(
-          chatId,
-          `${getBrain().getEmoji()} Recent commits:\n\nThis feature will show recent commit history.`
-        );
+      }
+      case "status": {
+        const status = await gitAutomation.getBranchStatus(session.currentProject.path);
+
+        let message = `${getBrain().getEmoji()} <b>Git Status</b>\n\n`;
+        message += `<b>Branch:</b> ${escapeHtml(status.branch)}\n`;
+
+        if (status.ahead > 0 || status.behind > 0) {
+          message += `<b>Remote:</b> `;
+          if (status.ahead > 0) message += `↑${status.ahead} commits ahead `;
+          if (status.behind > 0) message += `↓${status.behind} commits behind`;
+          message += `\n`;
+        }
+
+        message += `\n<b>Changes:</b>\n`;
+        if (status.staged > 0) message += `🟢 Staged: ${status.staged}\n`;
+        if (status.modified > 0) message += `🟡 Modified: ${status.modified}\n`;
+        if (status.untracked > 0) message += `⚪ Untracked: ${status.untracked}\n`;
+
+        if (status.staged === 0 && status.modified === 0 && status.untracked === 0) {
+          message += `\n✅ Working directory clean`;
+        }
+
+        await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
         break;
+      }
+      case "log": {
+        // Parse limit from args (e.g., "/git log 20")
+        const parts = args.split(' ');
+        const limit = parts[1] && !isNaN(parseInt(parts[1])) ? parseInt(parts[1]) : 10;
+
+        const commits = await gitAutomation.getCommitHistory(session.currentProject.path, limit);
+
+        if (commits.length === 0) {
+          await this.bot.sendMessage(
+            chatId,
+            `${getBrain().getEmoji()} No commit history found.`
+          );
+          break;
+        }
+
+        let message = `${getBrain().getEmoji()} <b>Recent Commits</b> (showing ${commits.length})\n\n`;
+
+        for (const commit of commits) {
+          const shortHash = commit.hash.substring(0, 8);
+          message += `<code>${shortHash}</code> ${escapeHtml(commit.message)}\n`;
+          message += `<i>${commit.author}</i> • ${commit.date}\n\n`;
+        }
+
+        // Handle Telegram message length limit
+        if (message.length > 4000) {
+          message = message.substring(0, 3950) + '\n\n... (truncated)';
+        }
+
+        await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+        break;
+      }
       default:
         await this.bot.sendMessage(
           chatId,
@@ -3427,6 +3527,24 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       });
     }
 
+    // Initialize and register task executors
+    try {
+      const { getTaskQueue } = await import('./brain/tasks/task-queue.js');
+      const taskQueue = getTaskQueue();
+      await taskQueue.initialize();
+
+      // Register executor for claude_query tasks
+      taskQueue.registerExecutor('claude_query', async (task) => {
+        return await this.executeClaudeQueryTask(task);
+      });
+
+      console.log("Task queue initialized with claude_query executor.");
+    } catch (error) {
+      this.logger.error("Failed to initialize task queue", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Start self-improvement scheduled jobs
     try {
       startScheduledJobs();
@@ -3434,6 +3552,98 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       this.logger.error("Failed to start scheduled jobs", {
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Execute a claude_query task - runs Claude with the task description
+   */
+  private async executeClaudeQueryTask(task: Task): Promise<{ success: boolean; result?: unknown; error?: string }> {
+    try {
+      const chatId = task.chatId;
+
+      // Get user's session
+      const session = this.sessionManager.getSession(chatId);
+      if (!session || !session.currentProject) {
+        // Notify user that no project is selected
+        try {
+          await this.bot.sendMessage(
+            chatId,
+            `⚠️ Task <b>${task.id.slice(-8)}</b> failed: No project selected.\n\nPlease select a project with /select first.`,
+            { parse_mode: "HTML" }
+          );
+        } catch {
+          // User might have blocked the bot
+        }
+        return { success: false, error: "No project selected" };
+      }
+
+      // Notify user that task is starting
+      try {
+        await this.bot.sendMessage(
+          chatId,
+          `🔄 Starting task: <b>${task.title}</b>`,
+          { parse_mode: "HTML" }
+        );
+      } catch {
+        // Ignore send errors
+      }
+
+      // Execute Claude with the task description
+      const claudeProcess = this.claudeSpawner.spawnProcess({
+        project: session.currentProject,
+        prompt: task.description,
+        model: this.config.claudeDefaultModel,
+        onOutput: async (data: string) => {
+          try {
+            await this.bot.sendMessage(chatId, data);
+          } catch {
+            // Message might be too long, try to truncate
+            try {
+              await this.bot.sendMessage(chatId, data.substring(0, 4000) + "\n\n... (truncated)");
+            } catch {
+              // Ignore
+            }
+          }
+        },
+      });
+
+      // Wait for process to complete
+      const result = await this.claudeSpawner.waitForProcess(claudeProcess);
+
+      // Notify user of completion
+      const success = result.exitCode === 0;
+      try {
+        if (success) {
+          await this.bot.sendMessage(
+            chatId,
+            `✅ Task completed: <b>${task.title}</b>`,
+            { parse_mode: "HTML" }
+          );
+        } else {
+          await this.bot.sendMessage(
+            chatId,
+            `❌ Task failed: <b>${task.title}</b>\n\n${result.errors[0] || 'Unknown error'}`,
+            { parse_mode: "HTML" }
+          );
+        }
+      } catch {
+        // Ignore
+      }
+
+      return { success, result: result.output, error: result.errors[0] };
+    } catch (error) {
+      // Notify user of error
+      try {
+        await this.bot.sendMessage(
+          task.chatId,
+          `❌ Task error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      } catch {
+        // Ignore
+      }
+
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 

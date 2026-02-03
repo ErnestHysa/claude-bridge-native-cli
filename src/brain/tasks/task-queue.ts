@@ -20,6 +20,9 @@ interface TaskQueueState {
   schedules: TaskSchedule[];
 }
 
+// Task executor function type
+type TaskExecutor = (task: Task) => Promise<{ success: boolean; result?: unknown; error?: string }>;
+
 /**
  * Task Queue - manages background tasks
  */
@@ -30,6 +33,7 @@ export class TaskQueue {
   private state: TaskQueueState;
   private processing = false;
   private intervalId: NodeJS.Timeout | null = null;
+  private executors: Map<string, TaskExecutor> = new Map();
 
   constructor() {
     this.tasksDir = this.brain.getTasksDir();
@@ -239,24 +243,68 @@ export class TaskQueue {
   }
 
   /**
+   * Register a task executor for a specific task type
+   */
+  registerExecutor(type: string, executor: TaskExecutor): void {
+    this.executors.set(type, executor);
+  }
+
+  /**
+   * Unregister a task executor
+   */
+  unregisterExecutor(type: string): void {
+    this.executors.delete(type);
+  }
+
+  /**
    * Process pending tasks
    */
   private async processPending(): Promise<void> {
     if (this.state.pending.length === 0) return;
 
+    // Limit concurrent tasks
+    if (this.state.running.length >= 3) return;
+
     // Get highest priority task
-    const task = this.state.pending.shift();
+    const task = this.sortByPriority(this.state.pending).shift();
     if (!task) return;
+
+    // Remove from pending
+    this.state.pending = this.state.pending.filter(t => t.id !== task.id);
 
     // Move to running
     this.state.running.push(task);
     await this.updateTaskStatus(task.id, 'running');
 
-    // TODO: Execute the task based on type
-    // For now, just mark as completed after a delay
-    console.log(`[TaskQueue] Processing task: ${task.title}`);
+    console.log(`[TaskQueue] Processing task: ${task.id} (${task.type})`);
 
-    // Task execution will be handled by registered executors
+    // Execute the task
+    try {
+      const executor = this.executors.get(task.type);
+      if (executor) {
+        const result = await executor(task);
+        if (result.success) {
+          await this.updateTaskStatus(task.id, 'completed', result.result);
+        } else {
+          await this.updateTaskStatus(task.id, 'failed', undefined, result.error);
+        }
+      } else {
+        // No executor registered - mark as failed
+        await this.updateTaskStatus(
+          task.id,
+          'failed',
+          undefined,
+          `No executor registered for task type: ${task.type}`
+        );
+      }
+    } catch (error) {
+      await this.updateTaskStatus(
+        task.id,
+        'failed',
+        undefined,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
   }
 
   /**
