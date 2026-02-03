@@ -267,6 +267,20 @@ export class GoalSystem {
   }
 
   /**
+   * Get all active goals
+   */
+  async getActiveGoals(): Promise<Goal[]> {
+    return this.getGoals({ status: 'active' });
+  }
+
+  /**
+   * Get goals for a specific user
+   */
+  async getGoalsByChatId(chatId: number): Promise<Goal[]> {
+    return this.getGoals({ chatId });
+  }
+
+  /**
    * Update goal
    */
   async updateGoal(
