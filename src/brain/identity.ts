@@ -128,6 +128,11 @@ const DEFAULT_PREFERENCES: UserPreferences = {
     autoDetect: true,
     watchForChanges: true,
   },
+  autonomous: {
+    permissionLevel: 'supervised',
+    maxTasksPerSession: 5,
+    allowedProjectPaths: [],
+  },
 };
 
 /**
@@ -286,6 +291,54 @@ export class IdentityManager {
 
   getTimezone(): string {
     return this.preferences.user.timezone;
+  }
+
+  /**
+   * Get autonomous mode preferences
+   */
+  getAutonomousPreferences(): UserPreferences['autonomous'] {
+    return this.preferences.autonomous || {
+      permissionLevel: 'supervised',
+      maxTasksPerSession: 5,
+      allowedProjectPaths: [],
+    };
+  }
+
+  /**
+   * Get user's default project path for autonomous mode
+   */
+  getDefaultProjectPath(): string | undefined {
+    return this.preferences.autonomous?.defaultProjectPath;
+  }
+
+  /**
+   * Get user's permission level for autonomous mode
+   */
+  getPermissionLevel(): 'read_only' | 'advisory' | 'supervised' | 'autonomous' | 'full' {
+    return this.preferences.autonomous?.permissionLevel || 'supervised';
+  }
+
+  /**
+   * Set autonomous mode preferences
+   */
+  async setAutonomousPreferences(prefs: Partial<UserPreferences['autonomous']>): Promise<void> {
+    const current = this.getAutonomousPreferences();
+    const updated = { ...current, ...prefs };
+    await this.updatePreferences({ autonomous: updated });
+  }
+
+  /**
+   * Set default project path for autonomous mode
+   */
+  async setDefaultProjectPath(projectPath: string): Promise<void> {
+    await this.setAutonomousPreferences({ defaultProjectPath: projectPath });
+  }
+
+  /**
+   * Set permission level for autonomous mode
+   */
+  async setPermissionLevel(level: 'read_only' | 'advisory' | 'supervised' | 'autonomous' | 'full'): Promise<void> {
+    await this.setAutonomousPreferences({ permissionLevel: level });
   }
 }
 

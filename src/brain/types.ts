@@ -81,6 +81,13 @@ export interface UserPreferences {
     autoDetect: boolean;
     watchForChanges: boolean;
   };
+  // Autonomous mode preferences
+  autonomous?: {
+    defaultProjectPath?: string;  // Default project for autonomous tasks
+    permissionLevel?: 'read_only' | 'advisory' | 'supervised' | 'autonomous' | 'full';
+    maxTasksPerSession?: number;   // Limit autonomous work per session
+    allowedProjectPaths?: string[]; // Whitelist of projects AI can work on
+  };
 }
 
 // ===========================================
