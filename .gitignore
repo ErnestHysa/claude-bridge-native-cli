@@ -43,3 +43,23 @@ temp/
 *.db-shm
 *.db-wal
 nul
+
+# Runtime data in src/brain/ (ignore generated/user data, keep source code)
+src/brain/heartbeats/*.json
+src/brain/identity/*.json
+src/brain/sessions/*.json
+src/brain/projects/*.json
+src/brain/memory/knowledge/*.json
+src/brain/setup/*.json
+src/brain/notifications/*.json
+src/brain/context-tracker/*.json
+src/brain/learning/*.json
+src/brain/decisions/*.json
+src/brain/intentions/*.json
+src/brain/goals/*.json
+src/brain/opportunities/*.json
+src/brain/refactoring/*.json
+src/brain/feedback/*.json
+src/brain/feature/*.json
+src/brain/analyzer/*.json
+src/brain/errors/*.json
