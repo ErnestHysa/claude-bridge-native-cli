@@ -3176,9 +3176,12 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 
     try {
       const taskQueue = getTaskQueue();
+      const { getBrain } = await import('./brain/brain-manager.js');
+      const brain = getBrain();
       await taskQueue.addSchedule({
         cronExpression: cron,
         enabled: true,
+        timezone: brain.getTimezone(),
         task: {
           type: "custom",
           title: taskDesc.split(" ").slice(0, 5).join(" "),

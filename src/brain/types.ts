@@ -193,6 +193,7 @@ export interface TaskSchedule {
   cronExpression: string;
   task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
   enabled: boolean;
+  timezone?: string;
   lastRun?: number;
   nextRun?: number;
   runCount?: number;

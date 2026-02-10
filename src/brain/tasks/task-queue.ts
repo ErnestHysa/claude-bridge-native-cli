@@ -10,6 +10,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getBrain } from '../brain-manager.js';
+import { getNextCronRun } from '../automations/cron-utils.js';
 import type { Task, TaskStatus, TaskPriority, TaskSchedule } from '../types.js';
 
 interface TaskQueueState {
@@ -34,6 +35,7 @@ export class TaskQueue {
   private processing = false;
   private intervalId: NodeJS.Timeout | null = null;
   private executors: Map<string, TaskExecutor> = new Map();
+  private taskTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
   constructor() {
     this.tasksDir = this.brain.getTasksDir();
@@ -106,6 +108,13 @@ export class TaskQueue {
   }
 
   /**
+   * Get running tasks
+   */
+  getRunningTasks(): Task[] {
+    return [...this.state.running];
+  }
+
+  /**
    * Cancel a task
    */
   async cancelTask(taskId: string): Promise<boolean> {
@@ -137,6 +146,10 @@ export class TaskQueue {
   ): Promise<boolean> {
     const task = this.getTask(taskId);
     if (!task) return false;
+
+    if (task.metadata?.timedOut && status === 'completed') {
+      return false;
+    }
 
     // Remove from current array
     this.removeFromArrays(taskId);
@@ -180,10 +193,12 @@ export class TaskQueue {
    * Add a scheduled task (cron)
    */
   async addSchedule(schedule: Omit<TaskSchedule, 'id' | 'runCount' | 'lastRun' | 'nextRun'>): Promise<string> {
+    const now = Date.now();
     const newSchedule: TaskSchedule = {
       ...schedule,
       id: this.generateTaskId(),
       runCount: 0,
+      nextRun: this.calculateNextRun(schedule.cronExpression, now, schedule.timezone),
     };
 
     this.state.schedules.push(newSchedule);
@@ -282,12 +297,14 @@ export class TaskQueue {
     try {
       const executor = this.executors.get(task.type);
       if (executor) {
+        this.startTaskTimeout(task);
         const result = await executor(task);
         if (result.success) {
           await this.updateTaskStatus(task.id, 'completed', result.result);
         } else {
           await this.updateTaskStatus(task.id, 'failed', undefined, result.error);
         }
+        this.clearTaskTimeout(task.id);
       } else {
         // No executor registered - mark as failed
         await this.updateTaskStatus(
@@ -304,6 +321,7 @@ export class TaskQueue {
         undefined,
         error instanceof Error ? error.message : String(error)
       );
+      this.clearTaskTimeout(task.id);
     }
   }
 
@@ -332,7 +350,7 @@ export class TaskQueue {
 
         // Calculate next run
         schedule.lastRun = now;
-        schedule.nextRun = this.calculateNextRun(schedule.cronExpression, now);
+        schedule.nextRun = this.safeCalculateNextRun(schedule.cronExpression, now, schedule.timezone);
         schedule.runCount = (schedule.runCount || 0) + 1;
 
         await this.saveState();
@@ -342,18 +360,9 @@ export class TaskQueue {
 
   /**
    * Calculate next run time from cron expression
-   * Simplified implementation - supports basic patterns
    */
-  private calculateNextRun(cron: string, from: number): number {
-    // Very basic implementation - just support hourly for now
-    // TODO: Implement full cron parsing
-    const parts = cron.split(' ');
-    if (parts[1] === '*') {
-      // Every minute - add 1 minute
-      return from + 60 * 1000;
-    }
-    // Default to 1 hour
-    return from + 60 * 60 * 1000;
+  private calculateNextRun(cron: string, from: number, timezone?: string): number {
+    return getNextCronRun(cron, from, timezone ?? this.brain.getTimezone());
   }
 
   // ===========================================
@@ -372,6 +381,7 @@ export class TaskQueue {
     try {
       const content = await readFile(this.queueFile, 'utf-8');
       this.state = JSON.parse(content);
+      this.refreshSchedules();
     } catch {
       this.state = this.emptyState();
     }
@@ -423,6 +433,45 @@ export class TaskQueue {
       if (priorityDiff !== 0) return priorityDiff;
       return a.createdAt - b.createdAt; // Earlier tasks first
     });
+  }
+
+  private refreshSchedules(): void {
+    const now = Date.now();
+    this.state.schedules = this.state.schedules.map(schedule => ({
+      ...schedule,
+      nextRun: schedule.enabled
+        ? schedule.nextRun ?? this.safeCalculateNextRun(schedule.cronExpression, now, schedule.timezone)
+        : schedule.nextRun,
+    }));
+  }
+
+  private safeCalculateNextRun(cron: string, from: number, timezone?: string): number | undefined {
+    try {
+      return this.calculateNextRun(cron, from, timezone);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private startTaskTimeout(task: Task): void {
+    const timeoutMs = typeof task.metadata?.timeoutMs === 'number' ? task.metadata.timeoutMs : undefined;
+    if (!timeoutMs || timeoutMs <= 0) return;
+    if (this.taskTimeouts.has(task.id)) return;
+
+    const timer = setTimeout(async () => {
+      task.metadata = task.metadata ? { ...task.metadata, timedOut: true } : { timedOut: true };
+      await this.updateTaskStatus(task.id, 'failed', undefined, 'Task timed out.');
+      this.taskTimeouts.delete(task.id);
+    }, timeoutMs);
+    this.taskTimeouts.set(task.id, timer);
+  }
+
+  private clearTaskTimeout(taskId: string): void {
+    const timer = this.taskTimeouts.get(taskId);
+    if (timer) {
+      clearTimeout(timer);
+      this.taskTimeouts.delete(taskId);
+    }
   }
 
   private generateTaskId(): string {
