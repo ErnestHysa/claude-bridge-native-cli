@@ -35,8 +35,21 @@ export interface ChatSession {
   claudeProcess: ClaudeProcess | null;
   conversationHistory: ConversationMessage[];
   pendingApproval: EditApprovalRequest | null;
-  status: 'idle' | 'processing' | 'awaiting_approval';
+  pendingQuestion?: PendingAgentQuestion | null;
+  status: 'idle' | 'processing' | 'awaiting_approval' | 'awaiting_response';
   lastActivity: number;
+}
+
+/**
+ * Pending question from agent to user (AskUserQuestion bridge)
+ */
+export interface PendingAgentQuestion {
+  id: string;
+  question: string;
+  options: Array<{ label: string; description?: string; value: string }>;
+  multiSelect: boolean;
+  allowsCustom: boolean;
+  timestamp: number;
 }
 
 export interface ClaudeProcess {

@@ -35,6 +35,11 @@ export { BrainManager, getBrain, resetBrain } from './brain-manager.js';
 // Identity Manager
 export { IdentityManager, getIdentityManager } from './identity.js';
 
+// Soul Manager
+export { SoulManager, getSoulManager, resetSoulManager } from './identity/soul-manager.js';
+export { SoulValidator, getSoulValidator } from './identity/soul-validator.js';
+export type { ValidationError, ValidationResult } from './identity/soul-validator.js';
+
 // Setup Wizard
 export { SetupWizard, createSetupWizard } from './setup-wizard.js';
 export type { SetupStep, SetupState } from './setup-wizard.js';
@@ -175,3 +180,6 @@ export type { ContinuationSession, ContinuationTask, SessionState } from './auto
 // Proactive Improvement Scheduler
 export { ProactiveImprovementScheduler, getProactiveImprovementScheduler, resetProactiveImprovementScheduler } from './autonomous/proactive-scheduler.js';
 export type { QualityGateLevel, QualityGateConfig, QualityGateResult, ProactiveImprovementOptions, ProactiveScanResult } from './autonomous/proactive-scheduler.js';
+
+// Natural Language Processing
+export * from './nl/index.js';

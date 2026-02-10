@@ -64,6 +64,18 @@ src/brain/feature/*.json
 src/brain/analyzer/*.json
 src/brain/errors/*.json
 
+# NL Context data (per-conversation state)
+src/brain/sessions/context/*.json
+
+# Long-term memory data (summaries, patterns, preferences)
+src/brain/memory/long-term/*.json
+src/brain/memory/patterns/*.json
+
+# Identity soul files (user-specific agent identities)
+src/brain/identity/agents/*.md
+src/brain/identity/users/*.md
+src/brain/identity/soul.md
+
 # Upgrade planning docs (sensitive project plans)
 upgrade.md
 docs/upgrade.md
