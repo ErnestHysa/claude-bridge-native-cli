@@ -25,6 +25,7 @@ import { getMemoryStore } from '../memory/memory-store.js';
 import { getGitAutomation } from '../git/git-automation.js';
 import { getTestWatcher } from '../tests/test-watcher.js';
 import { getCodeAnalyzer } from '../analyzer/code-analyzer.js';
+import { getDocWriter } from '../agents/doc-writer.js';
 
 // ============================================
 // Types
@@ -503,9 +504,40 @@ export class FeatureWorkflowManager {
   /**
    * Run documentation stage
    */
-  private async runDocumentationStage(_workflow: FeatureWorkflow, _options: WorkflowOptions): Promise<void> {
-    // Documentation updates would be handled here
-    // For now, this is a placeholder
+  private async runDocumentationStage(workflow: FeatureWorkflow, _options: WorkflowOptions): Promise<void> {
+    const docWriter = getDocWriter();
+
+    try {
+      const syncResult = await docWriter.syncDocumentation(workflow.feature.projectPath);
+
+      // If there is no existing documentation to sync, generate a README as baseline.
+      if (syncResult.updated.length === 0 && syncResult.errors.length === 0) {
+        const generated = await docWriter.generateREADME(workflow.feature.projectPath, {
+          includeExamples: true,
+          includeTypes: true,
+          includeExports: true,
+        });
+        syncResult.updated.push(...generated.files);
+      }
+
+      await this.memory.setFact(`feature_workflow:docs:${workflow.id}:${Date.now()}`, {
+        workflowId: workflow.id,
+        updatedFiles: syncResult.updated,
+        errors: syncResult.errors,
+        timestamp: Date.now(),
+      });
+
+      if (syncResult.errors.length > 0) {
+        workflow.error = `Documentation updates failed: ${syncResult.errors.join('; ')}`;
+      }
+
+      workflow.updatedAt = Date.now();
+      await this.storeWorkflow(workflow);
+    } catch (error) {
+      workflow.error = `Documentation stage failed: ${error instanceof Error ? error.message : String(error)}`;
+      workflow.updatedAt = Date.now();
+      await this.storeWorkflow(workflow);
+    }
   }
 
   /**

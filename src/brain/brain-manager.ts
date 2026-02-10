@@ -265,7 +265,7 @@ export class BrainManager {
     _type: HeartbeatEntry['type'],
     _details?: Record<string, unknown>,
   ): Promise<void> {
-    // TODO: Write to heartbeat file
+    // Persist heartbeat event to disk for recovery/audit tracking
     const heartbeatPath = join(HEARTBEATS_DIR, `${Date.now()}.json`);
     const { writeFile } = await import('node:fs/promises');
     await writeFile(heartbeatPath, JSON.stringify({

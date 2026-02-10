@@ -628,9 +628,23 @@ export class AgentOrchestrator {
         steps[1].output = 'Tests not run or failed';
       }
 
-      // Step 3: Deploy (placeholder - would use actual deploy command)
-      steps.push({ step: 'Deploy', status: 'skipped' });
-      steps[2].output = `Deployment to ${environment} not configured`;
+      // Step 3: Deploy
+      steps.push({ step: 'Deploy', status: 'running' });
+      const deployCommand = await this.resolveDeployCommand(projectPath, environment);
+      if (!deployCommand) {
+        steps[2].status = 'skipped';
+        steps[2].output = `No deploy script found for environment ${environment}`;
+      } else {
+        try {
+          await execAsync(deployCommand, { cwd: projectPath, timeout: 120000 });
+          steps[2].status = 'complete';
+          steps[2].output = `Deployment command executed: ${deployCommand}`;
+        } catch (error) {
+          steps[2].status = 'failed';
+          steps[2].output = error instanceof Error ? error.message : String(error);
+          throw new Error('Deployment failed');
+        }
+      }
 
       return {
         agent: agent.name,
@@ -645,6 +659,29 @@ export class AgentOrchestrator {
         error: error instanceof Error ? error.message : String(error),
         steps,
       };
+    }
+  }
+
+
+  private async resolveDeployCommand(projectPath: string, environment: string): Promise<string | null> {
+    const packageJsonPath = join(projectPath, 'package.json');
+    if (!existsSync(packageJsonPath)) {
+      return null;
+    }
+
+    try {
+      const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf-8')) as {
+        scripts?: Record<string, string>;
+      };
+
+      const scripts = packageJson.scripts || {};
+      const envScript = `deploy:${environment}`;
+      if (scripts[envScript]) return `npm run ${envScript}`;
+      if (scripts.deploy) return 'npm run deploy';
+
+      return null;
+    } catch {
+      return null;
     }
   }
 

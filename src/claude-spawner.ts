@@ -210,10 +210,15 @@ export async function waitForClaudeProcess(
         clearInterval(checkInterval);
 
         const result: ClaudeCliResult = {
+          ...(() => {
+            const parsed = parseClaudeOutput(process.outputBuffer.join("\n"));
+            return {
+              edits: parsed.edits,
+              errors: parsed.errors,
+            };
+          })(),
           exitCode: process.status === "completed" ? 0 : 1,
           output: process.outputBuffer.join("\n"),
-          edits: [], // TODO: parse edits from output
-          errors: [],
           duration: Date.now() - process.startTime,
         };
 
@@ -256,17 +261,48 @@ export function killClaudeProcess(claudeProc: ClaudeProcess): void {
 
 /**
  * Parse Claude CLI output for file edits
- * This is a placeholder - actual implementation depends on Claude's output format
+ * Parses common Claude CLI output markers for edits and error lines.
  */
 export function parseClaudeOutput(_output: string): {
   edits: Array<{ path: string; action: "modify" | "create" | "delete" }>;
   errors: string[];
 } {
+  const output = _output ?? "";
   const edits: Array<{ path: string; action: "modify" | "create" | "delete" }> = [];
   const errors: string[] = [];
 
-  // TODO: Implement parsing based on Claude CLI output format
-  // This may need to detect file paths, diffs, etc.
+  // Parse explicit file action markers from common CLI/diff output patterns.
+  // Supported examples:
+  // - "Modified: src/file.ts"
+  // - "Created src/new.ts"
+  // - "Deleted: src/old.ts"
+  const actionPatterns: Array<{ action: "modify" | "create" | "delete"; regex: RegExp }> = [
+    { action: "modify", regex: /\b(?:modified|updated|edited)\s*:?\s+([^\s,;]+\.[\w.-]+)/gi },
+    { action: "create", regex: /\b(?:created|added|new file)\s*:?\s+([^\s,;]+\.[\w.-]+)/gi },
+    { action: "delete", regex: /\b(?:deleted|removed)\s*:?\s+([^\s,;]+\.[\w.-]+)/gi },
+  ];
+
+  const seen = new Set<string>();
+  for (const { action, regex } of actionPatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(output)) !== null) {
+      const path = match[1]?.trim();
+      if (!path) continue;
+
+      const key = `${action}:${path}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edits.push({ path, action });
+    }
+  }
+
+  // Parse typical error markers
+  const lines = output.split('\n');
+  for (const line of lines) {
+    if (/\b(error|failed|exception|traceback)\b/i.test(line)) {
+      errors.push(line.trim());
+    }
+  }
 
   return { edits, errors };
 }
