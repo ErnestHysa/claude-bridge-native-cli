@@ -1,3 +1,5 @@
+> **Historical note:** This document is preserved for upgrade traceability. For current runtime setup/usage, use `README.md`, `setup.md`, and `GUIDE.md` in the repository root.
+
 # User Guide (Phase 5 Edition)
 
 This guide is focused on the assistant-first workflow after the roadmap upgrades.

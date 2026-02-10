@@ -1,3 +1,5 @@
+> **Historical note:** This document is preserved for upgrade traceability. For current runtime setup/usage, use `README.md`, `setup.md`, and `GUIDE.md` in the repository root.
+
 # Phase 5 - Testing Strategy and Completion Notes
 
 This document records the Phase 5 testing pass for the Upgrade roadmap (Polish & Testing).

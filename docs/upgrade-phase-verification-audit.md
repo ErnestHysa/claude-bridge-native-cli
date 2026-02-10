@@ -1,3 +1,5 @@
+> **Historical note:** This document is preserved for upgrade traceability. For current runtime setup/usage, use `README.md`, `setup.md`, and `GUIDE.md` in the repository root.
+
 # Upgrade Phase Verification Audit (Deep Scan)
 
 Date: 2026-02-10

@@ -1,3 +1,5 @@
+> **Historical note:** This document is preserved for upgrade traceability. For current runtime setup/usage, use `README.md`, `setup.md`, and `GUIDE.md` in the repository root.
+
 # Phase 5 - Security Audit Summary
 
 This summary captures a lightweight code-level security audit for the current autonomous + plugin-enabled architecture.
