@@ -20,6 +20,10 @@ import { getMemoryStore } from '../memory/memory-store.js';
 import { getCodeAnalyzer } from '../analyzer/code-analyzer.js';
 import { getDependencyManager } from '../dependency/dependency-manager.js';
 import { getRefactoringAgent } from '../refactoring/refactoring-agent.js';
+import { Logger } from '../../utils.js';
+
+// Create a logger instance for this module
+const logger = new Logger('info');
 
 // ============================================
 // Types
@@ -175,7 +179,7 @@ export class OpportunityDetector {
     // Start scheduled scans
     this.startScheduledScans();
 
-    console.log('[OpportunityDetector] Started');
+    logger.info('OpportunityDetector started');
   }
 
   /**
@@ -187,7 +191,7 @@ export class OpportunityDetector {
       clearTimeout(this.scanTimer);
       this.scanTimer = undefined;
     }
-    console.log('[OpportunityDetector] Stopped');
+    logger.info('OpportunityDetector stopped');
   }
 
   /**
@@ -243,7 +247,7 @@ export class OpportunityDetector {
       timestamp: Date.now(),
     };
 
-    console.log(`[OpportunityDetector] Scan complete: ${found.length} opportunities in ${duration}ms`);
+    logger.info('Scan complete', { opportunitiesFound: found.length, durationMs: duration });
 
     return result;
   }
@@ -346,7 +350,7 @@ export class OpportunityDetector {
         }
       }
     } catch (error) {
-      console.error('[OpportunityDetector] Error scanning complexity:', error);
+      logger.error('Error scanning complexity', { error: error instanceof Error ? error.message : String(error) });
     }
 
     return opportunities;
@@ -398,7 +402,7 @@ export class OpportunityDetector {
         }
       }
     } catch (error) {
-      console.error('[OpportunityDetector] Error scanning duplication:', error);
+      logger.error('Error scanning duplication', { error: error instanceof Error ? error.message : String(error) });
     }
 
     return opportunities;
@@ -469,7 +473,7 @@ export class OpportunityDetector {
         }
       }
     } catch (error) {
-      console.error('[OpportunityDetector] Error scanning dependencies:', error);
+      logger.error('Error scanning dependencies', { error: error instanceof Error ? error.message : String(error) });
     }
 
     return opportunities;
@@ -521,7 +525,7 @@ export class OpportunityDetector {
         }
       }
     } catch (error) {
-      console.error('[OpportunityDetector] Error scanning security:', error);
+      logger.error('Error scanning security', { error: error instanceof Error ? error.message : String(error) });
     }
 
     return opportunities;
@@ -566,7 +570,7 @@ export class OpportunityDetector {
         }
       }
     } catch (error) {
-      console.error('[OpportunityDetector] Error scanning refactoring:', error);
+      logger.error('Error scanning refactoring', { error: error instanceof Error ? error.message : String(error) });
     }
 
     return opportunities;
@@ -796,7 +800,7 @@ export class OpportunityDetector {
             schedule.lastScan = now;
             schedule.nextScan = now + schedule.interval;
             this.memory.setFact(`scan_schedule:${schedule.projectPath}:${schedule.chatId}`, schedule);
-          }).catch(console.error);
+          }).catch((err) => logger.error('Error storing opportunity', { error: err instanceof Error ? err.message : String(err) }));
         }
 
         if (schedule.nextScan && schedule.nextScan < nextScanTime) {

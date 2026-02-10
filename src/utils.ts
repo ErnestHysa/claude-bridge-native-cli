@@ -576,3 +576,192 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
     timeout = setTimeout(() => func(...args), wait);
   };
 }
+
+// ===========================================
+// Input Validation Utilities
+// ===========================================
+
+/**
+ * Validation result interface
+ */
+export interface ValidationResult {
+  valid: boolean;
+  error?: string;
+  sanitized?: string;
+}
+
+/**
+ * Validate a Telegram chat ID
+ * Chat IDs should be positive integers
+ */
+export function validateChatId(chatId: number | string): ValidationResult {
+  const id = typeof chatId === 'string' ? parseInt(chatId, 10) : chatId;
+
+  if (isNaN(id)) {
+    return { valid: false, error: 'Chat ID must be a number' };
+  }
+
+  if (id <= 0) {
+    return { valid: false, error: 'Chat ID must be positive' };
+  }
+
+  if (!Number.isInteger(id)) {
+    return { valid: false, error: 'Chat ID must be an integer' };
+  }
+
+  if (id > Number.MAX_SAFE_INTEGER) {
+    return { valid: false, error: 'Chat ID exceeds maximum safe integer' };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate a file system path for security
+ * Checks for path traversal attempts and ensures path is within allowed bounds
+ */
+export function validatePath(inputPath: string, allowedRoots?: string[]): ValidationResult {
+  if (!inputPath || typeof inputPath !== 'string') {
+    return { valid: false, error: 'Path must be a non-empty string' };
+  }
+
+  // Check for path traversal attempts
+  if (inputPath.includes('..') || inputPath.includes('~')) {
+    return { valid: false, error: 'Path cannot contain .. or ~ for security reasons' };
+  }
+
+  // Check for null bytes
+  if (inputPath.includes('\0')) {
+    return { valid: false, error: 'Path cannot contain null bytes' };
+  }
+
+  // Normalize the path
+  const normalized = path.normalize(inputPath);
+
+  // If allowed roots are specified, check if path is within them
+  if (allowedRoots && allowedRoots.length > 0) {
+    const isAllowed = allowedRoots.some(root => {
+      const normalizedRoot = path.normalize(root);
+      return normalized.startsWith(normalizedRoot);
+    });
+
+    if (!isAllowed) {
+      return {
+        valid: false,
+        error: 'Path is not within allowed project directories',
+        sanitized: normalized
+      };
+    }
+  }
+
+  return { valid: true, sanitized: normalized };
+}
+
+/**
+ * Validate a project path
+ * Ensures the path exists and is a directory
+ */
+export async function validateProjectPath(projectPath: string): Promise<ValidationResult> {
+  // First do basic path validation
+  const pathResult = validatePath(projectPath);
+  if (!pathResult.valid) {
+    return pathResult;
+  }
+
+  const sanitizedPath = pathResult.sanitized || projectPath;
+
+  // Check if path exists
+  try {
+    const { statSync } = await import('node:fs');
+    const stats = statSync(sanitizedPath);
+
+    if (!stats.isDirectory()) {
+      return { valid: false, error: 'Path is not a directory' };
+    }
+
+    // Check if it looks like a project (has package.json or similar)
+    const { existsSync } = await import('node:fs');
+    const hasPackageJson = existsSync(path.join(sanitizedPath, 'package.json'));
+    const hasCargoToml = existsSync(path.join(sanitizedPath, 'Cargo.toml'));
+    const hasPyProject = existsSync(path.join(sanitizedPath, 'pyproject.toml'));
+    const hasGitDir = existsSync(path.join(sanitizedPath, '.git'));
+
+    if (!hasPackageJson && !hasCargoToml && !hasPyProject && !hasGitDir) {
+      return {
+        valid: false,
+        error: 'Path does not appear to be a project directory (no package.json, Cargo.toml, pyproject.toml, or .git)'
+      };
+    }
+
+    return { valid: true, sanitized: sanitizedPath };
+  } catch (error) {
+    return {
+      valid: false,
+      error: `Path validation failed: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+}
+
+/**
+ * Validate user input for command arguments
+ * Prevents command injection and limits length
+ */
+export function validateCommandInput(input: string, maxLength = 1000): ValidationResult {
+  if (!input || typeof input !== 'string') {
+    return { valid: false, error: 'Input must be a non-empty string' };
+  }
+
+  if (input.length > maxLength) {
+    return { valid: false, error: `Input exceeds maximum length of ${maxLength}` };
+  }
+
+  // Check for potentially dangerous shell metacharacters
+  const dangerousChars = /[;&|`$()<>]/g;
+  if (dangerousChars.test(input)) {
+    return {
+      valid: false,
+      error: 'Input contains potentially dangerous characters (shell metacharacters)'
+    };
+  }
+
+  // Trim and return sanitized
+  const sanitized = input.trim();
+
+  return { valid: true, sanitized };
+}
+
+/**
+ * Validate a time window string (HH:MM-HH:MM format)
+ */
+export function validateTimeWindow(timeWindow: string): ValidationResult {
+  if (!timeWindow || typeof timeWindow !== 'string') {
+    return { valid: false, error: 'Time window must be a string' };
+  }
+
+  // Check format: HH:MM-HH:MM
+  const timeWindowRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]-([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+  if (!timeWindowRegex.test(timeWindow)) {
+    return {
+      valid: false,
+      error: 'Time window must be in HH:MM-HH:MM format (e.g., 03:00-11:00)'
+    };
+  }
+
+  return { valid: true, sanitized: timeWindow };
+}
+
+/**
+ * Validate a permission level
+ */
+export function validatePermissionLevel(level: string): ValidationResult {
+  const validLevels = ['read_only', 'advisory', 'supervised', 'autonomous', 'full'];
+
+  if (!validLevels.includes(level)) {
+    return {
+      valid: false,
+      error: `Invalid permission level. Must be one of: ${validLevels.join(', ')}`
+    };
+  }
+
+  return { valid: true };
+}

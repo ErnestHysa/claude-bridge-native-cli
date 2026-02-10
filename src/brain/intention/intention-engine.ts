@@ -15,6 +15,10 @@
  */
 
 import { getMemoryStore } from '../memory/memory-store.js';
+import { Logger } from '../../utils.js';
+
+// Create a logger instance for this module
+const logger = new Logger('info');
 
 // ===========================================
 // Types
@@ -213,7 +217,7 @@ export class IntentionEngine {
       return intentions;
 
     } catch (error) {
-      console.error('[IntentionEngine] Error processing trigger:', error);
+      logger.error('Error processing trigger', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -666,7 +670,7 @@ export class IntentionEngine {
         intention
       );
     } catch (error) {
-      console.error('[IntentionEngine] Failed to store intention:', error);
+      logger.error('Failed to store intention', { intentionId: intention.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
 

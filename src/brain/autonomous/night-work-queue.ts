@@ -25,6 +25,10 @@ import type { TaskPriority } from '../types.js';
 import type { Goal } from '../goals/goal-system.js';
 import type { Intention, IntentionFilter } from '../intention/intention-engine.js';
 import type { ImprovementOpportunity } from '../opportunity/opportunity-detector.js';
+import { Logger } from '../../utils.js';
+
+// Create a logger instance for this module
+const logger = new Logger('info');
 
 // ===========================================
 // Night Work Task
@@ -458,7 +462,7 @@ export class NightWorkQueue {
 
       return addedCount;
     } catch (error) {
-      console.error('Error syncing from goals:', error);
+      logger.error('Error syncing from goals', { error: error instanceof Error ? error.message : String(error) });
       return 0;
     }
   }
@@ -564,7 +568,7 @@ export class NightWorkQueue {
 
       return addedCount;
     } catch (error) {
-      console.error('Error syncing from intentions:', error);
+      logger.error('Error syncing from intentions', { error: error instanceof Error ? error.message : String(error) });
       return 0;
     }
   }
@@ -721,7 +725,7 @@ export class NightWorkQueue {
 
       return addedCount;
     } catch (error) {
-      console.error('Error syncing from opportunities:', error);
+      logger.error('Error syncing from opportunities', { error: error instanceof Error ? error.message : String(error) });
       return 0;
     }
   }
@@ -837,7 +841,8 @@ export class NightWorkQueue {
       }
 
       return addedCount;
-    } catch {
+    } catch (error) {
+      logger.error('Error syncing from pending sessions', { error: error instanceof Error ? error.message : String(error) });
       return 0;
     }
   }
@@ -923,8 +928,9 @@ export class NightWorkQueue {
         this.state.lastExecutionAt = stored.lastExecutionAt;
         this.state.stats = stored.stats;
       }
-    } catch {
-      // Start fresh if load fails
+    } catch (error) {
+      // Start fresh if load fails, but log the error
+      logger.warn('Failed to load persisted queue state, starting fresh', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 }

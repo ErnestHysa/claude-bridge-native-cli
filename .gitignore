@@ -63,3 +63,7 @@ src/brain/feedback/*.json
 src/brain/feature/*.json
 src/brain/analyzer/*.json
 src/brain/errors/*.json
+
+# Upgrade planning docs (sensitive project plans)
+upgrade.md
+docs/upgrade.md

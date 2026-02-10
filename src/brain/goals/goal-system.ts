@@ -18,6 +18,10 @@
 
 import { getMemoryStore } from '../memory/memory-store.js';
 import type { IntentionType } from '../intention/intention-engine.js';
+import { Logger } from '../../utils.js';
+
+// Create a logger instance for this module
+const logger = new Logger('info');
 
 // ===========================================
 // Types
@@ -695,7 +699,7 @@ export class GoalSystem {
       await this.memory.setFact(`goal:${goal.id}`, goal);
       await this.memory.setFact(`goal:user:${goal.chatId}:active`, goal.id);
     } catch (error) {
-      console.error('[GoalSystem] Failed to store goal:', error);
+      logger.error('Failed to store goal', { goalId: goal.id, error: error instanceof Error ? error.message : String(error) });
     }
   }
 

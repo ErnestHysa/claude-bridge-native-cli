@@ -34,6 +34,9 @@ import {
   getIntentionEngine,
   getDecisionMaker,
   getGoalSystem,
+  getActivityTracker,
+  getAutonomousModeController,
+  getSessionContinuationManager,
   type SetupWizard,
   type AgentType,
   type NotificationType,
@@ -103,6 +106,17 @@ async function handleSetupWizard(
     await identityManager.updatePreferences(profile.preferences);
     await identityManager.markSetupComplete();
     await getBrain().markSetupComplete();
+
+    // Save inactive hours to activity tracker
+    const inactiveHours = profile.preferences.user?.inactiveHours;
+    if (inactiveHours?.enabled) {
+      await getActivityTracker().setInactiveHours(
+        chatId,
+        inactiveHours.start,
+        inactiveHours.end,
+        true
+      );
+    }
 
     // Clear from setup map
     setupWizards.delete(chatId);
@@ -192,7 +206,11 @@ export class TelegramBotHandler {
       { command: "decisions", description: "View recent AI decisions" },
       { command: "goals", description: "View goals and progress" },
       { command: "autonomous", description: "Autonomous mode status" },
+      { command: "inactivehours", description: "Set inactive hours for autonomous mode" },
+      { command: "continue", description: "Continue from previous session" },
+      { command: "handoff", description: "Hand off current work to autonomous mode" },
       { command: "permissions", description: "View/set permission level" },
+      { command: "setautonomousprefs", description: "Configure autonomous mode preferences" },
       { command: "approve", description: "Approve a pending action" },
       { command: "deny", description: "Deny a pending action" },
     ]).catch((err) => {
@@ -314,8 +332,20 @@ export class TelegramBotHandler {
     this.bot.onText(/\/autonomous(?:\s+(.+))?/, (msg, match) =>
       this.handleAutonomous(msg, match?.[1])
     );
+    this.bot.onText(/\/inactivehours(?:\s+(.+))?/, (msg, match) =>
+      this.handleInactiveHours(msg, match?.[1])
+    );
+    this.bot.onText(/\/continue(?:\s+(.+))?/, (msg, match) =>
+      this.handleContinue(msg, match?.[1])
+    );
+    this.bot.onText(/\/handoff(?:(?:\s+(.+))?)?/, (msg, match) =>
+      this.handleHandoff(msg, match?.[1])
+    );
     this.bot.onText(/\/permissions(?:\s+(.+))?/, (msg, match) =>
       this.handlePermissions(msg, match?.[1])
+    );
+    this.bot.onText(/\/setautonomousprefs(?:\s+(.+))?/, (msg, match) =>
+      this.handleSetAutonomousPrefs(msg, match?.[1])
     );
     this.bot.onText(/^\/approve(?:\s+(.+))?$/, (msg, match) =>
       this.handleApprove(msg, match?.[1])
@@ -342,6 +372,9 @@ export class TelegramBotHandler {
 
     // Callback query handlers (inline buttons)
     this.bot.on("callback_query", (query) => this.handleCallbackQuery(query));
+
+    // Universal message handler for activity tracking (runs before other handlers)
+    this.bot.on("message", (msg) => this.trackActivity(msg));
 
     // Text messages (prompts for Claude)
     this.bot.on("message", (msg) => this.handleTextMessage(msg));
@@ -4503,6 +4536,19 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
   }
 
   /**
+   * Track user activity (called on every message)
+   * This runs before other handlers to record activity
+   */
+  private async trackActivity(msg: Message): Promise<void> {
+    const chatId = msg.chat.id;
+
+    // Record activity asynchronously (don't block message handling)
+    getActivityTracker().recordActivity(chatId).catch((err) => {
+      this.logger.debug(`Activity tracking error: ${err}`);
+    });
+  }
+
+  /**
    * Format status for display
    */
   private formatStatus(status: string): string {
@@ -4747,31 +4793,274 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 
     await ensureBrainInitialized();
     const chatId = msg.chat.id;
-    const memory = getMemoryStore();
-
-    const storageKey = `autonomous_mode:${chatId}`;
+    const controller = getAutonomousModeController();
 
     if (action === "on") {
-      await memory.setFact(storageKey, { enabled: true, since: Date.now() });
-      await this.bot.sendMessage(chatId, "🤖 <b>Autonomous mode enabled</b>\n\nThe AI will now proactively work on goals and take actions based on your permission level.\n\nUse /permissions to set your permission level.");
+      await controller.setAutonomousMode(chatId, true);
+      const userState = await controller.getUserState(chatId);
+
+      let message = `🤖 <b>Autonomous mode enabled</b>\n\n`;
+      message += `The AI will now proactively work on your projects.\n\n`;
+
+      if (userState.activityData.inactiveHours.enabled) {
+        message += `<b>Inactive Hours:</b> ${userState.activityData.inactiveHours.start} - ${userState.activityData.inactiveHours.end}\n`;
+        message += `<i>You can also use /inactivehours to change this window.</i>\n\n`;
+      }
+
+      message += `Use /permissions to set your permission level.`;
+
+      await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
       return;
     }
 
     if (action === "off") {
-      await memory.setFact(storageKey, { enabled: false, since: Date.now() });
-      await this.bot.sendMessage(chatId, "🔒 <b>Autonomous mode disabled</b>\n\nThe AI will not take autonomous actions. You can still use all commands manually.");
+      await controller.setAutonomousMode(chatId, false);
+      await this.bot.sendMessage(chatId, "🔒 <b>Autonomous mode disabled</b>\n\nThe AI will not take autonomous actions.\n\nYou can still use all commands manually.");
       return;
     }
 
-    // Show status
-    const setting = await memory.getFact(storageKey) as { enabled: boolean } | undefined;
-    const isEnabled = setting?.enabled ?? false;
+    // Show detailed status
+    const userState = await controller.getUserState(chatId);
+    const { activityData, autonomousMode, isInAutonomousMode, isWorkInProgress } = userState;
+
+    let message = `🤖 <b>Autonomous Mode Status</b>\n\n`;
+
+    // Current mode
+    const modeDisplay = {
+      inactive_autonomous: "🌙 Autonomous (inactive hours)",
+      active_command: "💬 Active (command mode)",
+      away_pending: "⏳ Away (pending activity)",
+    };
+    message += `<b>Current Mode:</b> ${modeDisplay[autonomousMode]}\n`;
+    message += `<b>State:</b> ${activityData.state}\n`;
+    message += `<b>Manual Override:</b> ${activityData.autonomousEnabled ? "✅ On" : "❌ Off"}\n`;
+    message += `<b>In Autonomous Mode:</b> ${isInAutonomousMode ? "✅ Yes" : "❌ No"}\n`;
+
+    if (isWorkInProgress) {
+      message += `<b>Work In Progress:</b> 🔄 Yes\n`;
+    }
+
+    // Inactive hours
+    if (activityData.inactiveHours.enabled) {
+      message += `\n<b>Inactive Hours:</b> ${activityData.inactiveHours.start} - ${activityData.inactiveHours.end}\n`;
+    } else {
+      message += `\n<b>Inactive Hours:</b> Disabled\n`;
+    }
+
+    // Last activity
+    const lastActivityTime = new Date(activityData.lastActivity);
+    const timeSinceActivity = Date.now() - activityData.lastActivity;
+    const minutesAgo = Math.floor(timeSinceActivity / 60000);
+    message += `\n<b>Last Activity:</b> ${lastActivityTime.toLocaleTimeString()} (${minutesAgo}m ago)\n`;
+
+    // Actions
+    message += `\n<b>Actions:</b>\n`;
+    message += `/autonomous on - Enable autonomous mode\n`;
+    message += `/autonomous off - Disable autonomous mode\n`;
+    message += `/inactivehours HH:MM-HH:MM - Set inactive hours`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+  }
+
+  /**
+   * Handle /inactivehours command - Set inactive hours for autonomous mode
+   * Usage: /inactivehours HH:MM-HH:MM (e.g., 03:00-11:00)
+   */
+  private async handleInactiveHours(msg: Message, timeWindow?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const tracker = getActivityTracker();
+
+    if (!timeWindow) {
+      // Show current setting
+      const data = await tracker.getUserActivityData(chatId);
+      const hours = data.inactiveHours;
+      const isEnabled = hours.enabled;
+
+      let message = `🌙 <b>Inactive Hours</b>\n\n`;
+
+      if (isEnabled) {
+        message += `Current: <b>${hours.start} - ${hours.end}</b>\n\n`;
+        message += `During these hours, the AI will work autonomously on your projects.\n\n`;
+      } else {
+        message += `Status: <b>Disabled</b>\n\n`;
+        message += `Set inactive hours to enable autonomous work during specific times.\n\n`;
+      }
+
+      message += `<b>Usage:</b>\n`;
+      message += `/inactivehours HH:MM-HH:MM - Set your inactive hours\n`;
+      message += `<i>Example: /inactivehours 03:00-11:00</i>\n\n`;
+      message += `<b>Time format:</b> 24-hour format (HH:MM)\n`;
+      message += `<i>The AI will be fully autonomous during these hours.</i>`;
+
+      await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+      return;
+    }
+
+    // Parse and validate time window
+    const parsed = this.parseTimeWindow(timeWindow);
+
+    if (!parsed) {
+      await this.bot.sendMessage(
+        chatId,
+        `❌ <b>Invalid time format</b>\n\n` +
+          `Please use HH:MM-HH:MM format (24-hour).\n` +
+          `<i>Example: /inactivehours 03:00-11:00</i>`,
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    // Set the inactive hours
+    const { start, end } = parsed;
+    await tracker.setInactiveHours(chatId, start, end, true);
 
     await this.bot.sendMessage(
       chatId,
-      `🤖 <b>Autonomous Mode</b>\n\nStatus: ${isEnabled ? "✅ Enabled" : "❌ Disabled"}\n\n<b>Actions:</b>\n/autonomous on - Enable autonomous mode\n/autonomous off - Disable autonomous mode`,
+      `✅ <b>Inactive hours set</b>\n\n` +
+        `From: <b>${start}</b> To: <b>${end}</b>\n\n` +
+        `The AI will now work autonomously during these hours.\n` +
+        `Use /inactivehours to view current setting.`,
       { parse_mode: "HTML" }
     );
+  }
+
+  /**
+   * Parse time window string (HH:MM-HH:MM)
+   */
+  private parseTimeWindow(input: string): { start: string; end: string } | null {
+    const match = input.match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
+    if (!match) return null;
+
+    const [, startHour, startMin, endHour, endMin] = match;
+
+    // Validate hours and minutes
+    const startH = parseInt(startHour);
+    const startM = parseInt(startMin);
+    const endH = parseInt(endHour);
+    const endM = parseInt(endMin);
+
+    if (
+      startH < 0 || startH > 23 ||
+      startM < 0 || startM > 59 ||
+      endH < 0 || endH > 23 ||
+      endM < 0 || endM > 59
+    ) {
+      return null;
+    }
+
+    return {
+      start: `${startH.toString().padStart(2, '0')}:${startM.toString().padStart(2, '0')}`,
+      end: `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`,
+    };
+  }
+
+  /**
+   * Handle /continue command - Continue from previous session
+   */
+  private async handleContinue(msg: Message, sessionId?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const continuationManager = getSessionContinuationManager();
+
+    if (sessionId) {
+      // Resume specific session
+      const session = await continuationManager.resumeSession(chatId, sessionId);
+      if (session) {
+        await this.bot.sendMessage(
+          chatId,
+          `🔄 <b>Session Resumed</b>\n\n${continuationManager.formatSession(session)}`,
+          { parse_mode: "HTML" }
+        );
+      } else {
+        await this.bot.sendMessage(chatId, "Session not found.", { parse_mode: "HTML" });
+      }
+      return;
+    }
+
+    // Show list of continuable sessions
+    const continuable = await continuationManager.getContinuableSessions(chatId);
+
+    if (continuable.length === 0) {
+      await this.bot.sendMessage(
+        chatId,
+        "📋 <b>No sessions to continue</b>\n\n" +
+          "You don't have any paused or handed-off sessions.\n\n" +
+          "Use /handoff while working to create a session that can be continued later.",
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    let message = `📋 <b>Sessions to Continue</b>\n\n`;
+
+    for (let i = 0; i < continuable.length; i++) {
+      const session = continuable[i];
+      message += `<b>${i + 1}.</b> ${continuationManager.formatSession(session)}\n`;
+    }
+
+    message += `\nUse /continue &lt;session_id&gt; to resume a specific session.`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+  }
+
+  /**
+   * Handle /handoff command - Hand off current work to autonomous mode
+   */
+  private async handleHandoff(msg: Message, sessionId?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const continuationManager = getSessionContinuationManager();
+
+    // Check if there's an active session to hand off
+    const activeSession = await continuationManager.getActiveSession(chatId);
+
+    if (!activeSession && !sessionId) {
+      await this.bot.sendMessage(
+        chatId,
+        "🤖 <b>Handoff</b>\n\n" +
+          "No active session to hand off.\n\n" +
+          "<b>Usage:</b>\n" +
+          "/handoff - Hand off current active session\n" +
+          "/handoff &lt;session_id&gt; - Hand off a specific session\n\n" +
+          "Active sessions are created when you're working on a task.",
+        { parse_mode: "HTML" }
+      );
+      return;
+    }
+
+    // Perform the handoff
+    const result = await continuationManager.handoffToAutonomous(chatId, sessionId);
+
+    if (!result.session) {
+      await this.bot.sendMessage(chatId, "Failed to hand off session.", { parse_mode: "HTML" });
+      return;
+    }
+
+    let message = `🤖 <b>Handed Off to Autonomous Mode</b>\n\n`;
+
+    if (result.tasksCreated > 0) {
+      message += `Created <b>${result.tasksCreated}</b> task(s) for autonomous completion.\n\n`;
+      message += `The AI will work on these during your inactive hours.\n\n`;
+    } else {
+      message += `Session paused (no pending tasks to hand off).\n\n`;
+    }
+
+    message += `Use /continue to resume this session when you return.`;
+
+    await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
   }
 
   /**
@@ -4900,6 +5189,158 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
   }
 
   /**
+   * Handle /setautonomousprefs command - Configure autonomous mode preferences
+   * Usage: /setautonomousprefs <key> <value>
+   * Keys: permission, project, maxtasks, allowedpaths
+   */
+  private async handleSetAutonomousPrefs(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const identityManager = getIdentityManager();
+
+    if (!args) {
+      // Show current settings
+      const prefs = identityManager.getAutonomousPreferences();
+      let message = `⚙️ <b>Autonomous Preferences</b>\n\n`;
+
+      if (prefs?.permissionLevel) {
+        message += `<b>Permission Level:</b> ${prefs.permissionLevel}\n`;
+      } else {
+        message += `<b>Permission Level:</b> supervised (default)\n`;
+      }
+
+      if (prefs?.defaultProjectPath) {
+        message += `<b>Default Project:</b> ${escapeHtml(prefs.defaultProjectPath)}\n`;
+      } else {
+        message += `<b>Default Project:</b> Not set\n`;
+      }
+
+      if (prefs?.maxTasksPerSession) {
+        message += `<b>Max Tasks/Session:</b> ${prefs.maxTasksPerSession}\n`;
+      } else {
+        message += `<b>Max Tasks/Session:</b> Not set (unlimited)\n`;
+      }
+
+      if (prefs?.allowedProjectPaths && prefs.allowedProjectPaths.length > 0) {
+        message += `<b>Allowed Projects:</b>\n`;
+        for (const path of prefs.allowedProjectPaths) {
+          message += `  • ${escapeHtml(path)}\n`;
+        }
+      } else {
+        message += `<b>Allowed Projects:</b> Not set (all projects allowed)\n`;
+      }
+
+      message += `\n<b>Usage:</b>\n`;
+      message += `/setautonomousprefs permission <level> - Set permission level\n`;
+      message += `/setautonomousprefs project <path> - Set default project\n`;
+      message += `/setautonomousprefs maxtasks <number> - Set max tasks per session\n`;
+      message += `/setautonomousprefs allowedpaths <path1,path2,...> - Set allowed projects`;
+
+      await this.bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+      return;
+    }
+
+    // Parse args: key value
+    const parts = args.split(" ");
+    const key = parts[0];
+    const value = parts.slice(1).join(" ");
+
+    try {
+      switch (key) {
+        case "permission": {
+          const validLevels = ["read_only", "advisory", "supervised", "autonomous", "full"];
+          if (!validLevels.includes(value)) {
+            await this.bot.sendMessage(
+              chatId,
+              `❌ Invalid permission level.\n\nValid levels: ${validLevels.join(", ")}`
+            );
+            return;
+          }
+          await identityManager.setPermissionLevel(value as "read_only" | "advisory" | "supervised" | "autonomous" | "full");
+          await this.bot.sendMessage(
+            chatId,
+            `✅ <b>Permission level set to: ${value}</b>`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case "project": {
+          if (!value || value.trim() === "") {
+            await this.bot.sendMessage(chatId, "❌ Please provide a project path.\n\nUsage: /setautonomousprefs project /path/to/project");
+            return;
+          }
+          await identityManager.setDefaultProjectPath(value);
+          await this.bot.sendMessage(
+            chatId,
+            `✅ <b>Default project set to: ${escapeHtml(value)}</b>\n\nThis project will be used for autonomous tasks when no project is specified.`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case "maxtasks": {
+          const num = parseInt(value, 10);
+          if (isNaN(num) || num < 1) {
+            await this.bot.sendMessage(chatId, "❌ Invalid number. Please provide a positive integer.\n\nUsage: /setautonomousprefs maxtasks 5");
+            return;
+          }
+          await identityManager.setAutonomousPreferences({ maxTasksPerSession: num });
+          await this.bot.sendMessage(
+            chatId,
+            `✅ <b>Max tasks per session set to: ${num}</b>`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        case "allowedpaths": {
+          if (!value || value.trim() === "") {
+            // Clear allowed paths (allow all)
+            await identityManager.setAutonomousPreferences({ allowedProjectPaths: [] });
+            await this.bot.sendMessage(
+              chatId,
+              `✅ <b>Allowed projects cleared</b>\n\nAll projects are now allowed for autonomous mode.`,
+              { parse_mode: "HTML" }
+            );
+            return;
+          }
+          const paths = value.split(",").map(p => p.trim()).filter(p => p.length > 0);
+          await identityManager.setAutonomousPreferences({ allowedProjectPaths: paths });
+          const pathsList = paths.map(p => `• ${escapeHtml(p)}`).join("\n");
+          await this.bot.sendMessage(
+            chatId,
+            `✅ <b>Allowed projects set:</b>\n\n${pathsList}\n\nOnly these projects can be modified in autonomous mode.`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+
+        default: {
+          await this.bot.sendMessage(
+            chatId,
+            `❌ Unknown key: ${escapeHtml(key)}\n\nValid keys: permission, project, maxtasks, allowedpaths`,
+            { parse_mode: "HTML" }
+          );
+          break;
+        }
+      }
+    } catch (error) {
+      this.logger.error("Error setting autonomous preferences", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.bot.sendMessage(
+        chatId,
+        `❌ Failed to set preference: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
    * Get emoji for intention type
    */
   private getIntentionTypeEmoji(type: string): string {
@@ -5008,6 +5449,16 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    // Start autonomous mode controller
+    try {
+      await getAutonomousModeController().start();
+      console.log("Autonomous mode controller started.");
+    } catch (error) {
+      this.logger.error("Failed to start autonomous mode controller", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -5106,6 +5557,16 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
    * Stop the bot
    */
   public async stop(): Promise<void> {
+    // Stop autonomous mode controller
+    try {
+      await getAutonomousModeController().stop();
+      console.log("Autonomous mode controller stopped.");
+    } catch (error) {
+      this.logger.error("Failed to stop autonomous mode controller", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Save all sessions before shutdown
     try {
       await this.sessionManager.saveSessions();

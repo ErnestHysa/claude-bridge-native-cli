@@ -159,3 +159,19 @@ export type { UserFeedback, FeedbackRating, FeedbackType, FeedbackCategory, Feed
 // Activity Tracker
 export { ActivityTracker, getActivityTracker, resetActivityTracker, isWithinInactiveHours, parseTimeWindow, formatTimeWindow } from './autonomous/activity-tracker.js';
 export type { UserActivityData, UserActivityState, InactiveHours, AutonomousMode, TimeWindow } from './types.js';
+
+// Autonomous Mode Controller
+export { AutonomousModeController, getAutonomousModeController, resetAutonomousModeController } from './autonomous/mode-controller.js';
+export type { AutonomousModeEvent, ModeEventHandler } from './autonomous/mode-controller.js';
+
+// Night Work Queue
+export { NightWorkQueue, getNightWorkQueue, resetNightWorkQueue } from './autonomous/night-work-queue.js';
+export type { NightWorkTask, NightWorkTaskType, NightWorkTaskSource, NightWorkTaskStatus, NightWorkTaskResult } from './autonomous/night-work-queue.js';
+
+// Session Continuation
+export { SessionContinuationManager, getSessionContinuationManager, resetSessionContinuationManager } from './autonomous/session-continuation.js';
+export type { ContinuationSession, ContinuationTask, SessionState } from './autonomous/session-continuation.js';
+
+// Proactive Improvement Scheduler
+export { ProactiveImprovementScheduler, getProactiveImprovementScheduler, resetProactiveImprovementScheduler } from './autonomous/proactive-scheduler.js';
+export type { QualityGateLevel, QualityGateConfig, QualityGateResult, ProactiveImprovementOptions, ProactiveScanResult } from './autonomous/proactive-scheduler.js';

@@ -23,6 +23,7 @@ export type SetupStep =
   | 'languages'
   | 'style'
   | 'git'
+  | 'inactiveHours'
   | 'complete';
 
 export interface SetupState {
@@ -36,6 +37,9 @@ export interface SetupState {
     gitBranch?: string;
     commitStyle?: 'conventional' | 'descriptive' | 'minimal';
     projectsBase?: string;
+    inactiveHoursStart?: string;
+    inactiveHoursEnd?: string;
+    inactiveHoursEnabled?: boolean;
   };
 }
 
@@ -84,7 +88,7 @@ Let's set up your brain profile. This will help me work better with you.
 
 I'll ask you a few questions. You can skip any question by typing "skip".
 
-<b>Step 1 of 6</b>
+<b>Step 1 of 7</b>
 
 What should I call you? (Your name or nickname)`;
 
@@ -93,7 +97,7 @@ What should I call you? (Your name or nickname)`;
 
 Great to meet you! ${this.formatData('userName')}
 
-<b>Step 2 of 6</b>
+<b>Step 2 of 7</b>
 
 What's your timezone? (Examples: UTC, America/New_York, Europe/London)
 Type "skip" to use UTC.`;
@@ -103,7 +107,7 @@ Type "skip" to use UTC.`;
 
 Perfect! ${this.formatData('timezone')}
 
-<b>Step 3 of 6</b>
+<b>Step 3 of 7</b>
 
 What programming languages do you use most?
 You can list them like: TypeScript, Python, Rust
@@ -114,7 +118,7 @@ Or type "skip" for defaults.`;
 
 Got it! ${this.formatData('languages')}
 
-<b>Step 4 of 6</b>
+<b>Step 4 of 7</b>
 
 How should I communicate with you?
 • <b>concise</b> - Brief, to the point
@@ -128,7 +132,7 @@ Type your choice or "skip" for concise.`;
 
 Nice! ${this.formatData('codeStyle')}
 
-<b>Step 5 of 6</b>
+<b>Step 5 of 7</b>
 
 What's your default git branch? (Usually "main" or "master")
 Type "skip" for "main".`;
@@ -136,9 +140,28 @@ Type "skip" for "main".`;
       case 'git':
         return `🧠 <b>Setup Wizard</b>
 
-Almost done! ${this.formatData('gitBranch')}
+Great! ${this.formatData('gitBranch')}
 
-<b>Step 6 of 6</b>
+<b>Step 6 of 7</b>
+
+🤖 <b>Autonomous Mode</b>
+
+During which hours should I work autonomously on your projects?
+I'll be fully active during these hours without needing your input.
+
+Format: HH:MM-HH:MM (24-hour format)
+Examples:
+• 03:00-11:00 (works while you sleep)
+• 22:00-06:00 (night owl mode)
+
+Type "skip" to disable autonomous mode.`;
+
+      case 'inactiveHours':
+        return `🧠 <b>Setup Wizard</b>
+
+Autonomous hours set! ${this.formatInactiveHours()}
+
+<b>Step 7 of 7</b>
 
 What's your projects base directory?
 Type the path or "skip" for default.
@@ -158,9 +181,13 @@ Here's your profile:
 <b>Languages:</b> ${(this.state.data.languages || ['TypeScript']).join(', ')}
 <b>Style:</b> ${this.state.data.codeStyle || 'concise'}
 <b>Git Branch:</b> ${this.state.data.gitBranch || 'main'}
+<b>Autonomous Hours:</b> ${this.formatInactiveHours() || 'Disabled'}
 <b>Projects:</b> ${this.state.data.projectsBase || 'Default'}
 
-You can always update these with /profile command.
+You can always update these with:
+/profile - Update your profile
+/inactivehours - Change autonomous hours
+/autonomous on/off - Toggle autonomous mode
 
 Ready to code? Send a message or type /help!`;
 
@@ -214,12 +241,12 @@ Ready to code? Send a message or type /help!`;
         return { nextState: 'git' };
 
       case 'git':
-        if (trimmed.toLowerCase() !== 'skip') {
-          this.state.data.projectsBase = trimmed;
-        }
-        this.state.step = 'complete';
+        this.state.step = 'inactiveHours';
         this.saveState();
-        return { nextState: 'complete' };
+        return { nextState: 'inactiveHours' };
+
+      case 'inactiveHours':
+        return this.processInactiveHoursInput(trimmed);
 
       case 'complete':
         return { nextState: 'complete', message: 'Setup already complete!' };
@@ -275,6 +302,17 @@ Ready to code? Send a message or type /help!`;
             end: 18,
             timezone: this.state.data.timezone || 'UTC',
           },
+          inactiveHours: this.state.data.inactiveHoursEnabled
+            ? {
+                start: this.state.data.inactiveHoursStart || '03:00',
+                end: this.state.data.inactiveHoursEnd || '11:00',
+                enabled: true,
+              }
+            : {
+                start: '03:00',
+                end: '11:00',
+                enabled: false,
+              },
         },
         git: {
           defaultBranch: this.state.data.gitBranch || 'main',
@@ -387,6 +425,70 @@ Ready to code? Send a message or type /help!`;
    */
   private getStatePath(): string {
     return join(SETUP_DIR, `${this.chatId}.json`);
+  }
+
+  /**
+   * Format inactive hours for display
+   */
+  private formatInactiveHours(): string {
+    if (!this.state.data.inactiveHoursEnabled) {
+      return '<b>Disabled</b>';
+    }
+
+    const start = this.state.data.inactiveHoursStart || '--:--';
+    const end = this.state.data.inactiveHoursEnd || '--:--';
+
+    return `<b>${start} - ${end}</b>`;
+  }
+
+  /**
+   * Process inactive hours input
+   */
+  private processInactiveHoursInput(input: string): { nextState: SetupStep; message?: string; error?: string } {
+    const trimmed = input.toLowerCase().trim();
+
+    if (trimmed === 'skip') {
+      // Skip inactive hours setup (disable autonomous mode)
+      this.state.data.inactiveHoursEnabled = false;
+      this.state.step = 'complete';
+      this.saveState();
+      return { nextState: 'complete' };
+    }
+
+    // Parse time window format: HH:MM-HH:MM
+    const match = trimmed.match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
+
+    if (!match) {
+      return {
+        nextState: 'inactiveHours',
+        error: 'Invalid format. Please use HH:MM-HHMM format (24-hour).\nExample: 03:00-11:00'
+      };
+    }
+
+    const [, startHour, startMin, endHour, endMin] = match;
+
+    // Validate hours and minutes
+    const startH = parseInt(startHour);
+    const startM = parseInt(startMin);
+    const endH = parseInt(endHour);
+    const endM = parseInt(endMin);
+
+    if (startH < 0 || startH > 23 || startM < 0 || startM > 59 ||
+        endH < 0 || endH > 23 || endM < 0 || endM > 59) {
+      return {
+        nextState: 'inactiveHours',
+        error: 'Invalid time. Hours: 00-23, Minutes: 00-59'
+      };
+    }
+
+    // Store the inactive hours
+    this.state.data.inactiveHoursStart = `${startH.toString().padStart(2, '0')}:${startM.toString().padStart(2, '0')}`;
+    this.state.data.inactiveHoursEnd = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+    this.state.data.inactiveHoursEnabled = true;
+
+    this.state.step = 'complete';
+    this.saveState();
+    return { nextState: 'complete' };
   }
 
   // ===========================================

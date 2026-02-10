@@ -21,6 +21,8 @@ import { getMemoryStore } from '../memory/memory-store.js';
 import { getDependencyManager } from '../dependency/dependency-manager.js';
 import { getTestHealer } from '../self-healing/test-healer.js';
 import { getRefactoringAgent } from '../refactoring/refactoring-agent.js';
+import { getNightWorkQueue } from '../autonomous/night-work-queue.js';
+import { getActivityTracker } from '../autonomous/activity-tracker.js';
 
 // ============================================
 // Types
@@ -36,7 +38,8 @@ export type BriefingSection =
   | 'commits'           // Recent commits
   | 'opportunities'      // Improvement opportunities
   | 'dependencies'      // Dependency status
-  | 'intentions';       // Active intentions
+  | 'intentions'        // Active intentions
+  | 'autonomous';       // Autonomous work summary
 
 /**
  * Briefing priority
@@ -125,6 +128,23 @@ export interface BriefingContent {
       priority: string;
     }>;
   };
+  autonomous?: {
+    enabled: boolean;
+    inactiveHours: {
+      start: string;
+      end: string;
+    } | null;
+    tasksCompleted: number;
+    tasksFailed: number;
+    totalWorkTime: number; // in minutes
+    workLogs: Array<{
+      taskType: string;
+      title: string;
+      status: string;
+      duration: number; // in seconds
+      timestamp: number;
+    }>;
+  };
 }
 
 /**
@@ -147,6 +167,7 @@ const BRIEFING_CONFIG = {
   // Default sections to include
   defaultSections: [
     'overview',
+    'autonomous',
     'tests',
     'goals',
     'commits',
@@ -289,6 +310,9 @@ export class MorningBriefing {
           break;
         case 'intentions':
           content.intentions = await this.generateIntentionsSection(projectPath);
+          break;
+        case 'autonomous':
+          content.autonomous = await this.generateAutonomousSection(chatId);
           break;
       }
     }
@@ -531,6 +555,53 @@ export class MorningBriefing {
   }
 
   /**
+   * Generate autonomous work section
+   */
+  private async generateAutonomousSection(chatId: number): Promise<BriefingContent['autonomous']> {
+    const activityTracker = getActivityTracker();
+    const workQueue = getNightWorkQueue();
+
+    // Get user activity data
+    const activityData = await activityTracker.getUserActivityData(chatId);
+    const inactiveHours = activityData.inactiveHours;
+
+    // Get work queue statistics
+    const userTasks = workQueue.getUserTasks(chatId);
+    const completedTasks = userTasks.filter(t => t.status === 'completed');
+    const failedTasks = userTasks.filter(t => t.status === 'failed');
+
+    // Calculate total work time (in minutes)
+    const totalWorkTimeMs = completedTasks.reduce((sum, t) => {
+      return sum + (t.result?.duration || 0);
+    }, 0);
+    const totalWorkTime = Math.floor(totalWorkTimeMs / 60000);
+
+    // Generate work logs
+    const workLogs = userTasks
+      .filter(t => t.status === 'completed' || t.status === 'failed')
+      .slice(-BRIEFING_CONFIG.maxItemsPerSection)
+      .map(t => ({
+        taskType: t.type,
+        title: t.title,
+        status: t.status,
+        duration: t.result?.duration || 0,
+        timestamp: t.result?.completedAt || t.createdAt,
+      }));
+
+    return {
+      enabled: inactiveHours.enabled || activityData.autonomousEnabled,
+      inactiveHours: inactiveHours.enabled ? {
+        start: inactiveHours.start,
+        end: inactiveHours.end,
+      } : null,
+      tasksCompleted: completedTasks.length,
+      tasksFailed: failedTasks.length,
+      totalWorkTime,
+      workLogs,
+    };
+  }
+
+  /**
    * Format briefing as Telegram message
    */
   formatBriefingMessage(report: BriefingReport): string {
@@ -589,6 +660,40 @@ export class MorningBriefing {
       }
       if (dependencies.vulnerable > 0) {
         message += `   ⚠️ ${dependencies.vulnerable} vulnerable\n`;
+      }
+    }
+
+    // Autonomous Work
+    if (content.autonomous) {
+      const { autonomous } = content;
+      if (autonomous.enabled || autonomous.tasksCompleted > 0) {
+        const emoji = autonomous.enabled ? '🤖' : '🌙';
+        message += `\n${emoji} <b>Autonomous Work:</b>\n`;
+
+        if (autonomous.inactiveHours) {
+          message += `   Hours: ${autonomous.inactiveHours.start} - ${autonomous.inactiveHours.end}\n`;
+        }
+
+        if (autonomous.tasksCompleted > 0 || autonomous.tasksFailed > 0) {
+          message += `   Tasks: ${autonomous.tasksCompleted} completed`;
+          if (autonomous.tasksFailed > 0) {
+            message += `, ${autonomous.tasksFailed} failed`;
+          }
+          message += '\n';
+        }
+
+        if (autonomous.totalWorkTime > 0) {
+          message += `   Work time: ${autonomous.totalWorkTime} min\n`;
+        }
+
+        if (autonomous.workLogs.length > 0) {
+          message += `   Recent work:\n`;
+          for (const log of autonomous.workLogs.slice(0, 3)) {
+            const statusEmoji = log.status === 'completed' ? '✅' : '❌';
+            const time = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            message += `      ${statusEmoji} ${log.title} (${time})\n`;
+          }
+        }
       }
     }
 

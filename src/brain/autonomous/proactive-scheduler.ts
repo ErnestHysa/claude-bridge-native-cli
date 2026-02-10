@@ -21,6 +21,10 @@ import { getActivityTracker } from './activity-tracker.js';
 import { getIdentityManager } from '../identity.js';
 import type { ImprovementOpportunity } from '../opportunity/opportunity-detector.js';
 import type { NightWorkTaskType } from './night-work-queue.js';
+import { Logger } from '../../utils.js';
+
+// Create a logger instance for this module
+const logger = new Logger('info');
 
 // ============================================
 // Types
@@ -261,7 +265,7 @@ export class ProactiveImprovementScheduler {
         });
         results.push(result);
       } catch (error) {
-        console.error(`Proactive scan failed for user ${userData.chatId}:`, error);
+        logger.error('Proactive scan failed for user', { chatId: userData.chatId, error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -427,7 +431,7 @@ export class ProactiveImprovementScheduler {
       // Return the default project path if set
       return autonomousPrefs?.defaultProjectPath || null;
     } catch (error) {
-      console.error(`Error getting user project path for chat ${_chatId}:`, error);
+      logger.error('Error getting user project path', { chatId: _chatId, error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -451,7 +455,7 @@ export class ProactiveImprovementScheduler {
       // Default to supervised if invalid
       return 'supervised';
     } catch (error) {
-      console.error(`Error getting user permission level for chat ${_chatId}:`, error);
+      logger.error('Error getting user permission level', { chatId: _chatId, error: error instanceof Error ? error.message : String(error) });
       return 'supervised';
     }
   }
