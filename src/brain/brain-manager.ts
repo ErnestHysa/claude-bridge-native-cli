@@ -31,6 +31,7 @@ const TASKS_DIR = join(BRAIN_DIR, 'tasks');
 const HEARTBEATS_DIR = join(BRAIN_DIR, 'heartbeats');
 const LOGS_DIR = join(BRAIN_DIR, 'logs');
 const SESSIONS_DIR = join(BRAIN_DIR, 'sessions');
+const AUTOMATIONS_DIR = join(BRAIN_DIR, 'automations');
 
 /**
  * Brain Manager class - coordinates all brain subsystems
@@ -98,6 +99,9 @@ export class BrainManager {
     const { getMorningBriefing } = await import('./briefing/morning-briefing.js');
     await getMorningBriefing().start();
 
+    const { getAutomationManager } = await import('./automations/automation-manager.js');
+    await getAutomationManager().start();
+
     const { getFeatureWorkflow } = await import('./feature/feature-workflow.js');
     await getFeatureWorkflow().start();
 
@@ -144,6 +148,7 @@ export class BrainManager {
       HEARTBEATS_DIR,
       LOGS_DIR,
       SESSIONS_DIR,
+      AUTOMATIONS_DIR,
       join(MEMORY_DIR, 'conversations'),
       join(MEMORY_DIR, 'embeddings'),
       join(MEMORY_DIR, 'knowledge'),

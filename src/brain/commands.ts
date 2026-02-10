@@ -11,6 +11,8 @@ import { getOrchestrator } from './agents/agent-orchestrator.js';
 import { getGitAutomation } from './git/git-automation.js';
 import { getBrain } from './brain-manager.js';
 import { getContextIndexer } from './context/context-indexer.js';
+import { getAutomationManager } from './automations/automation-manager.js';
+import { convertNaturalLanguageToCron } from './automations/nl-to-cron.js';
 
 /**
  * Get all brain-related Telegram commands
@@ -596,10 +598,12 @@ export function getBrainCommands(): BotCommand[] {
 
         try {
           const taskQueue = getTaskQueue();
+          const brain = getBrain();
           const chatId = ctx.chat?.id || 0;
           await taskQueue.addSchedule({
             cronExpression: cron,
             enabled: true,
+            timezone: brain.getTimezone(),
             task: {
               type: 'custom',
               title: taskDesc.split(' ').slice(0, 5).join(' '),
@@ -639,5 +643,107 @@ export function getBrainCommands(): BotCommand[] {
         }
       },
     },
+    {
+      command: 'automation',
+      description: 'Manage automations (create, enable, disable, reload)',
+      handler: async (ctx) => {
+        const text = ctx.message?.text?.trim() ?? '';
+        const [, action, ...rest] = text.split(' ');
+
+        if (!action) {
+          await ctx.reply(
+            'Usage:\n' +
+            '/automation create "<schedule>" "<title>" "<task>"\n' +
+            '/automation enable <id>\n' +
+            '/automation disable <id>\n' +
+            '/automation reload'
+          );
+          return;
+        }
+
+        const automationManager = getAutomationManager();
+
+        try {
+          if (action === 'create') {
+            const match = text.match(/create\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+\"([\s\S]+)\"/);
+            if (!match) {
+              await ctx.reply('Usage: /automation create "<schedule>" "<title>" "<task>"');
+              return;
+            }
+
+            const [, scheduleInput, title, task] = match;
+            const schedule = isCronExpression(scheduleInput)
+              ? scheduleInput
+              : convertNaturalLanguageToCron(scheduleInput).cron;
+
+            const chatId = ctx.chat?.id || 0;
+            const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `automation-${Date.now()}`;
+
+            await automationManager.createAutomationFile({
+              id,
+              title,
+              schedule,
+              timezone: getBrain().getTimezone(),
+              status: 'active',
+              createdBy: 'user',
+              chatId,
+              action: 'claude_query',
+              taskDescription: task,
+              projectPaths: [],
+              constraints: {},
+            });
+
+            await ctx.reply(`✅ Automation created: ${id}\nSchedule: ${schedule}`);
+            return;
+          }
+
+          if (action === 'enable' || action === 'disable') {
+            const id = rest[0];
+            if (!id) {
+              await ctx.reply(`Usage: /automation ${action} <id>`);
+              return;
+            }
+            await automationManager.updateAutomationStatus(id, action === 'enable' ? 'active' : 'paused');
+            await ctx.reply(`✅ Automation ${id} ${action}d.`);
+            return;
+          }
+
+          if (action === 'reload') {
+            await automationManager.reload();
+            await ctx.reply('✅ Automations reloaded.');
+            return;
+          }
+
+          await ctx.reply('Unknown automation command.');
+        } catch (error) {
+          await ctx.reply(`❌ Automation error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      },
+    },
+    {
+      command: 'automations',
+      description: 'List automations',
+      handler: async (ctx) => {
+        try {
+          const automations = getAutomationManager().getAutomations();
+          if (automations.length === 0) {
+            await ctx.reply('No automations found.');
+            return;
+          }
+
+          const response = automations
+            .map(a => `<b>${a.id}</b>\n${a.schedule} (${a.timezone})\nStatus: ${a.status}`)
+            .join('\n\n');
+
+          await ctx.reply(`<b>Automations:</b>\n\n${response}`, { parse_mode: 'HTML' });
+        } catch (error) {
+          await ctx.reply(`❌ Failed to list automations: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      },
+    },
   ];
+}
+
+function isCronExpression(value: string): boolean {
+  return value.trim().split(/\s+/).length === 5;
 }

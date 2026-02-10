@@ -138,6 +138,9 @@ export type { FeatureSpec, FeatureWorkflow, ImplementationTask, WorkflowStage, F
 
 // Morning Briefing
 export { MorningBriefing, getMorningBriefing, resetMorningBriefing } from './briefing/morning-briefing.js';
+
+// Automations
+export { AutomationManager, getAutomationManager } from './automations/automation-manager.js';
 export type { BriefingReport, BriefingContent, BriefingSchedule, BriefingSection, BriefingPriority } from './briefing/morning-briefing.js';
 
 // Transparency Tracker
