@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getBrain } from '../brain-manager.js';
 import { getMemoryStore } from '../memory/memory-store.js';
-import type { SmartCommitOptions, PRDraft, FileChange } from '../types.js';
+import type { SmartCommitOptions, PRDraft, FileChange, PRGroup } from '../types.js';
 
 const execAsync = promisify(exec);
 
@@ -243,6 +243,27 @@ export class GitAutomation {
       baseBranch: targetBase,
       changes,
     };
+  }
+
+  /**
+   * Group file changes into logical PR buckets
+   */
+  groupChangesForPR(changes: FileChange[]): PRGroup[] {
+    const groups = new Map<string, FileChange[]>();
+
+    for (const change of changes) {
+      const [topLevel] = change.path.split(/[\\/]/);
+      const groupKey = topLevel || 'root';
+      const existing = groups.get(groupKey) ?? [];
+      existing.push(change);
+      groups.set(groupKey, existing);
+    }
+
+    return Array.from(groups.entries()).map(([name, groupedChanges]) => ({
+      name,
+      description: name === 'root' ? 'Project root changes' : `Changes under ${name}/`,
+      changes: groupedChanges,
+    }));
   }
 
   /**

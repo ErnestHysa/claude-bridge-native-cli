@@ -107,6 +107,14 @@ export class TaskQueue {
     return this.sortByPriority(this.state.pending);
   }
 
+  getQueueLength(): number {
+    return this.state.pending.length;
+  }
+
+  getActiveTaskCount(): number {
+    return this.state.running.length;
+  }
+
   /**
    * Get running tasks
    */

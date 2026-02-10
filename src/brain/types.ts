@@ -357,6 +357,12 @@ export interface PRDraft {
   changes: FileChange[];
 }
 
+export interface PRGroup {
+  name: string;
+  description?: string;
+  changes: FileChange[];
+}
+
 export interface FileChange {
   path: string;
   action: 'added' | 'modified' | 'deleted' | 'renamed';

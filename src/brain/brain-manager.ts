@@ -32,6 +32,8 @@ const HEARTBEATS_DIR = join(BRAIN_DIR, 'heartbeats');
 const LOGS_DIR = join(BRAIN_DIR, 'logs');
 const SESSIONS_DIR = join(BRAIN_DIR, 'sessions');
 const AUTOMATIONS_DIR = join(BRAIN_DIR, 'automations');
+const UPLOADS_DIR = join(BRAIN_DIR, 'uploads');
+const PLUGINS_DIR = join(BRAIN_DIR, 'plugins');
 
 /**
  * Brain Manager class - coordinates all brain subsystems
@@ -117,6 +119,12 @@ export class BrainManager {
     const { getSubagentCoordinator } = await import('./agents/subagent-coordinator.js');
     await getSubagentCoordinator().initialize();
 
+    const { getPluginManager } = await import('./plugins/plugin-manager.js');
+    await getPluginManager().initialize();
+
+    const { getDashboardServer } = await import('./dashboard/dashboard-server.js');
+    getDashboardServer().start();
+
     // Initialize metrics tracker
     await getMetricsTracker().start();
 
@@ -149,6 +157,8 @@ export class BrainManager {
       LOGS_DIR,
       SESSIONS_DIR,
       AUTOMATIONS_DIR,
+      UPLOADS_DIR,
+      PLUGINS_DIR,
       join(MEMORY_DIR, 'conversations'),
       join(MEMORY_DIR, 'embeddings'),
       join(MEMORY_DIR, 'knowledge'),
@@ -308,6 +318,14 @@ export class BrainManager {
 
   getSessionsDir(): string {
     return SESSIONS_DIR;
+  }
+
+  getUploadsDir(): string {
+    return UPLOADS_DIR;
+  }
+
+  getPluginsDir(): string {
+    return PLUGINS_DIR;
   }
 }
 

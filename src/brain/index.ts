@@ -189,3 +189,14 @@ export type { QualityGateLevel, QualityGateConfig, QualityGateResult, ProactiveI
 
 // Natural Language Processing
 export * from './nl/index.js';
+
+// Plugins
+export { PluginManager, getPluginManager, resetPluginManager } from './plugins/plugin-manager.js';
+export type { PluginManifest, PluginContext, PluginHandler } from './plugins/plugin-manager.js';
+
+// Dashboard
+export { DashboardServer, getDashboardServer, resetDashboardServer } from './dashboard/dashboard-server.js';
+
+// Image analysis
+export { analyzeTelegramImage } from './image/image-analyzer.js';
+export type { ImageAnalysis } from './image/image-analyzer.js';
