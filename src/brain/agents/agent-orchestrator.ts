@@ -159,6 +159,14 @@ export class AgentOrchestrator {
     return Array.from(this.agents.values());
   }
 
+  getActiveAgents(): Agent[] {
+    return this.getAllAgents().filter(agent => agent.status === 'busy');
+  }
+
+  getActiveAgentCount(): number {
+    return this.getActiveAgents().length;
+  }
+
   /**
    * Get an available agent of a specific type
    */

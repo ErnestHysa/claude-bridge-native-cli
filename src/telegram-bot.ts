@@ -34,9 +34,11 @@ import {
   getIntentionEngine,
   getDecisionMaker,
   getGoalSystem,
+  getPluginManager,
   getActivityTracker,
   getAutonomousModeController,
   getSessionContinuationManager,
+  analyzeTelegramImage,
   type SetupWizard,
   type AgentType,
   type NotificationType,
@@ -195,6 +197,7 @@ export class TelegramBotHandler {
       { command: "notifications", description: "Manage notification preferences" },
       { command: "analyze", description: "Analyze code quality" },
       { command: "learn", description: "Learn code patterns" },
+      { command: "plugins", description: "List/run installed plugins" },
       // Self-improvement commands
       { command: "heartbeat", description: "Run heartbeat check manually" },
       { command: "semantic", description: "Semantic memory search" },
@@ -312,6 +315,9 @@ export class TelegramBotHandler {
     this.bot.onText(/\/learn(?:\s+(.+))?/, (msg, match) =>
       this.handleLearn(msg, match?.[1])
     );
+    this.bot.onText(/\/plugins(?:\s+(.+))?/, (msg, match) =>
+      this.handlePlugins(msg, match?.[1])
+    );
 
     // Self-improvement commands
     this.bot.onText(/\/heartbeat/, (msg) => this.handleHeartbeat(msg));
@@ -375,6 +381,11 @@ export class TelegramBotHandler {
 
     // Universal message handler for activity tracking (runs before other handlers)
     this.bot.on("message", (msg) => this.trackActivity(msg));
+
+    // Photo messages
+    this.bot.on("photo", (msg) => {
+      void this.handlePhoto(msg);
+    });
 
     // Text messages (prompts for Claude)
     this.bot.on("message", (msg) => this.handleTextMessage(msg));
@@ -578,6 +589,7 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 <b>Code Intelligence 🧠</b>
 /analyze - Analyze code quality
 /learn - Learn code patterns from project
+/plugins - List and run installed plugins
 
 <b>Self-Improvement 🔄</b>
 /heartbeat - Run heartbeat check manually
@@ -607,6 +619,60 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 • Mass changes (5+ files): Require approval`,
       { parse_mode: "HTML" }
     );
+  }
+
+
+  /**
+   * Handle /plugins command
+   */
+  private async handlePlugins(msg: Message, args?: string): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    await ensureBrainInitialized();
+    const chatId = msg.chat.id;
+    const trimmed = args?.trim() ?? '';
+    const pluginManager = getPluginManager();
+
+    if (!trimmed) {
+      const plugins = pluginManager.listPlugins();
+      if (plugins.length === 0) {
+        await this.bot.sendMessage(chatId, 'No plugins are currently installed.');
+        return;
+      }
+
+      const lines = plugins.map((plugin) => {
+        const caps = plugin.capabilities?.length ? plugin.capabilities.join(', ') : 'none';
+        return `• <b>${escapeHtml(plugin.name)}</b> v${escapeHtml(plugin.version)}\n  ${escapeHtml(plugin.description ?? 'No description')}\n  caps: <code>${escapeHtml(caps)}</code>`;
+      });
+
+      await this.bot.sendMessage(chatId, `<b>Installed Plugins (${plugins.length})</b>\n\n${lines.join('\n\n')}\n\nRun: <code>/plugins run &lt;name&gt; [jsonPayload]</code>`, { parse_mode: 'HTML' });
+      return;
+    }
+
+    const [command, name, ...payloadParts] = trimmed.split(/\s+/);
+    if (command !== 'run' || !name) {
+      await this.bot.sendMessage(chatId, 'Usage:\n/plugins\n/plugins run <name> [jsonPayload]');
+      return;
+    }
+
+    let payload: unknown = undefined;
+    if (payloadParts.length > 0) {
+      const payloadText = payloadParts.join(' ');
+      try {
+        payload = JSON.parse(payloadText);
+      } catch {
+        payload = payloadText;
+      }
+    }
+
+    try {
+      const result = await pluginManager.runPlugin(name, payload);
+      await this.bot.sendMessage(chatId, `<b>Plugin result (${escapeHtml(name)})</b>\n<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`, { parse_mode: 'HTML' });
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `Plugin execution failed: ${escapeHtml(error instanceof Error ? error.message : String(error))}`, { parse_mode: 'HTML' });
+    }
   }
 
   /**
@@ -4285,6 +4351,52 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
 
     this.sessionManager.setPendingApproval(chatId, null);
     this.sessionManager.setSessionStatus(chatId, "idle");
+  }
+
+  /**
+   * Handle incoming photos for image analysis
+   */
+  private async handlePhoto(msg: Message): Promise<void> {
+    if (!this.isAuthorized(msg)) {
+      return this.sendNotAuthorized(msg);
+    }
+
+    const chatId = msg.chat.id;
+    const photo = msg.photo?.[msg.photo.length - 1];
+
+    if (!photo?.file_id) {
+      return;
+    }
+
+    await ensureBrainInitialized();
+    this.sessionManager.getOrCreateSession(chatId, {
+      username: msg.from?.username,
+      firstName: msg.from?.first_name,
+      lastName: msg.from?.last_name,
+    });
+
+    const uploadsDir = getBrain().getUploadsDir();
+    const filePath = await this.bot.downloadFile(photo.file_id, uploadsDir);
+    const analysis = analyzeTelegramImage(filePath, photo);
+
+    const description = [
+      `Image received: ${analysis.filename}`,
+      analysis.width && analysis.height ? `Dimensions: ${analysis.width}x${analysis.height}` : null,
+      analysis.sizeBytes ? `Size: ${analysis.sizeBytes} bytes` : null,
+      msg.caption ? `Caption: ${msg.caption}` : null,
+    ].filter(Boolean).join('\n');
+
+    this.sessionManager.addToConversation(chatId, {
+      role: 'user',
+      content: description,
+      timestamp: Date.now(),
+    });
+
+    await this.bot.sendMessage(
+      chatId,
+      `📷 Image saved for analysis.\n${description}\n\nReply with what you'd like me to analyze.`,
+      { parse_mode: "HTML" }
+    );
   }
 
   /**

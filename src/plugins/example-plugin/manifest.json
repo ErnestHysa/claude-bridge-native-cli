@@ -1,0 +1,7 @@
+{
+  "name": "example-plugin",
+  "version": "1.0.0",
+  "description": "Example plugin that echoes input with metadata.",
+  "entry": "./handler.js",
+  "capabilities": ["echo"]
+}
