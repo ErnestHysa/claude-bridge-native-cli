@@ -248,7 +248,7 @@ export function killClaudeProcess(claudeProc: ClaudeProcess): void {
         // Process already dead - this is expected
       }
     }, 5000);
-  } catch (error) {
+  } catch {
     // Log but don't throw - cleanup should be best-effort
     // Note: Don't delete from registry here - let the process's own 'close' event handle it
   }

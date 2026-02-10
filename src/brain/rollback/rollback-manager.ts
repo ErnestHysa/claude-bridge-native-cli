@@ -255,7 +255,7 @@ export class RollbackManager {
           originalContent: content,
           backupPath,
         });
-      } catch (error) {
+      } catch {
         // File might not exist or be readable
         console.warn(`[RollbackManager] Could not backup file: ${filePath}`);
       }
