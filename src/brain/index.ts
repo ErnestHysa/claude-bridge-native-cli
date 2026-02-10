@@ -59,6 +59,9 @@ export { TaskQueue, getTaskQueue } from './tasks/task-queue.js';
 
 // Agent Orchestrator
 export { AgentOrchestrator, getOrchestrator } from './agents/agent-orchestrator.js';
+export { SubagentCoordinator, getSubagentCoordinator, resetSubagentCoordinator } from './agents/subagent-coordinator.js';
+export { SubagentRegistry, getSubagentRegistry, resetSubagentRegistry } from './agents/subagent-registry.js';
+export { listAgentTemplates, loadAgentTemplate } from './agents/subagent-templates.js';
 
 // DocWriter Agent
 export { DocWriterAgent, getDocWriter, resetDocWriter } from './agents/doc-writer.js';

@@ -435,9 +435,13 @@ export class TestHealer {
         chatId: testFailure.chatId,
         projectPath: testFailure.projectPath,
         description: `Fix test failure: ${testFailure.testName}`,
+        prompt,
         type: strategy,
         agentType: 'builder',
         transparent: true,
+        autoFix: true,
+        maxRetries: 1,
+        isolate: true,
       });
 
       const duration = Date.now() - startTime;
