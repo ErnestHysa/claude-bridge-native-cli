@@ -383,6 +383,15 @@ export class PatternLearner {
       });
     }
 
+    if (tryFinallyCount > 0) {
+      patterns.workflows.push({
+        name: 'cleanup-flow',
+        description: 'Try-finally cleanup workflow',
+        steps: ['try block', 'finally cleanup'],
+        confidence: Math.min(tryFinallyCount / fileContents.size, 1),
+      });
+    }
+
     // API call pattern
     let fetchCount = 0;
     let axiosCount = 0;

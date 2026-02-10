@@ -249,7 +249,7 @@ export class AgentOrchestrator {
 
       workflow.status = 'completed';
       workflow.completedAt = Date.now();
-    } catch (error) {
+    } catch {
       workflow.status = 'failed';
       workflow.completedAt = Date.now();
     }
