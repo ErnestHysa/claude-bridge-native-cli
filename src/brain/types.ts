@@ -243,6 +243,80 @@ export interface AgentWorkflow {
 }
 
 // ===========================================
+// Execution Plan Types
+// ===========================================
+
+export interface ExecutionPlanStep {
+  id: string;
+  description: string;
+  agentType: AgentType;
+  dependencies: string[];
+  status: 'planned' | 'running' | 'completed' | 'failed';
+  estimatedDurationMs?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ExecutionPlan {
+  id: string;
+  description: string;
+  steps: ExecutionPlanStep[];
+  status: 'planned' | 'running' | 'completed' | 'failed';
+  createdAt: number;
+  approved?: boolean;
+  startedAt?: number;
+  completedAt?: number;
+  projectPath?: string;
+}
+
+// ===========================================
+// Subagent Types
+// ===========================================
+
+export type SubagentStatus =
+  | 'starting'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'unresponsive'
+  | 'stopped';
+
+export interface SubagentTaskDefinition {
+  id: string;
+  agentType: AgentType;
+  description: string;
+  projectPath?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+  attempt: number;
+  maxRetries: number;
+  heartbeatIntervalMs?: number;
+}
+
+export interface SubagentResult {
+  success: boolean;
+  output?: unknown;
+  error?: string;
+  startedAt: number;
+  completedAt: number;
+  attempt: number;
+}
+
+export interface SubagentSession {
+  id: string;
+  taskId: string;
+  agentType: AgentType;
+  pid: number;
+  status: SubagentStatus;
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  lastHeartbeat?: number;
+  heartbeatPath: string;
+  resultPath: string;
+  taskPath: string;
+}
+
+// ===========================================
 // Heartbeat / Metrics Types
 // ===========================================
 

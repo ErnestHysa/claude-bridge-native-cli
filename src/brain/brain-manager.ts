@@ -110,6 +110,9 @@ export class BrainManager {
     const { getTestHealer } = await import('./self-healing/test-healer.js');
     await getTestHealer().start();
 
+    const { getSubagentCoordinator } = await import('./agents/subagent-coordinator.js');
+    await getSubagentCoordinator().initialize();
+
     // Initialize metrics tracker
     await getMetricsTracker().start();
 

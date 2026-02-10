@@ -24,7 +24,13 @@ import type {
   AgentType,
   AgentWorkflow,
   AgentTask,
+  ExecutionPlan,
+  ExecutionPlanStep,
+  SubagentResult,
+  SubagentTaskDefinition,
 } from '../types.js';
+import { getSubagentCoordinator } from './subagent-coordinator.js';
+import { listAgentTemplates, loadAgentTemplate } from './subagent-templates.js';
 
 const execAsync = promisify(exec);
 
@@ -34,6 +40,7 @@ const execAsync = promisify(exec);
 export class AgentOrchestrator {
   private agents: Map<string, Agent> = new Map();
   private memory = getMemoryStore();
+  private subagentCoordinator = getSubagentCoordinator();
 
   constructor() {
     this.initializeDefaultAgents();
@@ -273,6 +280,30 @@ export class AgentOrchestrator {
       agent.status = 'idle';
       agent.currentTask = undefined;
     }
+  }
+
+  /**
+   * Execute an agent task by type (public API for subagents)
+   */
+  async runTaskForAgentType(
+    agentType: AgentType,
+    metadata: Record<string, unknown>
+  ): Promise<unknown> {
+    const agent = this.getAvailableAgent(agentType) || this.getAgentsByType(agentType)[0];
+    if (!agent) {
+      throw new Error(`No agent available for type: ${agentType}`);
+    }
+
+    const task: AgentTask = {
+      agentId: agent.id,
+      taskId: this.generateTaskId(),
+      dependencies: [],
+      status: 'pending',
+      result: metadata,
+      startedAt: Date.now(),
+    };
+
+    return this.executeAgentTask(task);
   }
 
   // ===========================================
@@ -610,6 +641,92 @@ export class AgentOrchestrator {
   }
 
   // ===========================================
+  // Plan-Then-Execute
+  // ===========================================
+
+  /**
+   * Create an execution plan from a description
+   */
+  createExecutionPlan(
+    description: string,
+    _chatId: number,
+    projectPath?: string
+  ): ExecutionPlan {
+    const workflow = this.createWorkflowFromDescription(description, _chatId, projectPath);
+    const steps: ExecutionPlanStep[] = workflow.tasks.map((task, index) => ({
+      id: `plan-step-${Date.now()}-${index}`,
+      description: `Execute ${this.getAgent(task.agentId)?.name ?? 'agent'} task`,
+      agentType: this.getAgent(task.agentId)?.type ?? 'custom',
+      dependencies: task.dependencies,
+      status: 'planned',
+      estimatedDurationMs: this.estimateDurationForAgent(this.getAgent(task.agentId)?.type),
+      metadata: projectPath ? { projectPath } : undefined,
+    }));
+
+    return {
+      id: `plan-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      description,
+      steps,
+      status: 'planned',
+      createdAt: Date.now(),
+      approved: false,
+      projectPath,
+    };
+  }
+
+  /**
+   * Execute an approved plan
+   */
+  async executePlan(plan: ExecutionPlan, options?: { isolateAgents?: boolean }): Promise<AgentWorkflow> {
+    if (!plan.approved) {
+      throw new Error('Plan must be approved before execution');
+    }
+
+    const tasks: AgentTask[] = plan.steps.map((step) => {
+      const agent = this.getAvailableAgent(step.agentType) || this.getAgentsByType(step.agentType)[0];
+      if (!agent) {
+        throw new Error(`No agent available for type: ${step.agentType}`);
+      }
+
+      return {
+        agentId: agent.id,
+        taskId: this.generateTaskId(),
+        dependencies: step.dependencies,
+        status: 'pending',
+        result: {
+          prompt: plan.description,
+          ...(plan.projectPath ? { projectPath: plan.projectPath } : {}),
+          ...(step.metadata ? step.metadata : {}),
+        },
+      };
+    });
+
+    if (options?.isolateAgents) {
+      const workflow: AgentWorkflow = {
+        id: this.generateWorkflowId(),
+        name: `Plan: ${plan.description.substring(0, 40)}`,
+        description: plan.description,
+        tasks,
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      await this.executeWorkflowWithIsolation(workflow);
+      return workflow;
+    }
+
+    return this.orchestrate({
+      name: `Plan: ${plan.description.substring(0, 40)}`,
+      description: plan.description,
+      tasks,
+    });
+  }
+
+  approvePlan(plan: ExecutionPlan): ExecutionPlan {
+    return { ...plan, approved: true };
+  }
+
+  // ===========================================
   // Helper Methods
   // ===========================================
 
@@ -735,9 +852,13 @@ export class AgentOrchestrator {
     chatId: number;
     projectPath: string;
     description: string;
+    prompt?: string;
     type: string;
     agentType: 'scout' | 'builder' | 'reviewer' | 'tester' | 'deployer';
     transparent: boolean;
+    autoFix?: boolean;
+    maxRetries?: number;
+    isolate?: boolean;
   }): Promise<{
     success: boolean;
     result?: unknown;
@@ -760,46 +881,40 @@ export class AgentOrchestrator {
 
       const agent = agents[0];
       const taskId = this.generateTaskId();
-
-      // Create agent task
-      const agentTask: AgentTask = {
-        taskId,
-        agentId: agent.id,
-        dependencies: [],
-        status: 'pending' as const,
-        result: {
-          projectPath,
-          prompt: description,
-          autonomous: true,
-        },
-        startedAt: Date.now(),
-      };
+      const prompt = params.prompt || description;
 
       // Send transparent notification if requested
       if (transparent) {
         this.sendTransparentNotification(params, agent);
       }
 
-      // Execute the task
-      agentTask.status = 'running';
-      const taskResult = await this.executeAgentTask(agentTask);
+      const taskResult = await this.executeAgentTaskWithRetry({
+        agent,
+        taskId,
+        metadata: {
+          projectPath,
+          prompt,
+          autonomous: true,
+        },
+        description,
+        autoFix: params.autoFix ?? description.toLowerCase().includes('fix'),
+        maxRetries: params.maxRetries,
+        isolate: params.isolate ?? false,
+      });
 
       // Extract changes from result
-      const changes = this.extractChanges(taskResult);
+      const changes = this.extractChanges(taskResult.result);
 
       // Extract learnings
-      const learnings = this.extractLearnings(taskResult);
+      const learnings = this.extractLearnings(taskResult.result);
 
       // Format user message
-      const userMessage = this.formatUserMessage(agent, taskResult, changes);
-
-      agentTask.status = 'completed';
-      agentTask.completedAt = Date.now();
-      agentTask.result = taskResult;
+      const userMessage = this.formatUserMessage(agent, taskResult.result, changes);
 
       return {
-        success: true,
-        result: taskResult,
+        success: taskResult.success,
+        result: taskResult.result,
+        error: taskResult.error,
         changes,
         userMessage,
         learnings,
@@ -955,6 +1070,140 @@ export class AgentOrchestrator {
   }
 
   /**
+   * Execute an agent task with retry logic
+   */
+  private async executeAgentTaskWithRetry(params: {
+    agent: Agent;
+    taskId: string;
+    metadata: Record<string, unknown>;
+    description: string;
+    autoFix: boolean;
+    maxRetries?: number;
+    isolate: boolean;
+  }): Promise<{ success: boolean; result: unknown; error?: string }> {
+    const maxRetries = params.maxRetries ?? (params.autoFix ? 3 : 0);
+    let lastError: string | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const result = params.isolate
+          ? await this.executeIsolatedTask(params.agent.type, params.taskId, params.metadata, attempt + 1, maxRetries)
+          : await this.executeInProcessTask(params.agent, params.taskId, params.metadata);
+
+        const failureReason = this.detectFailure(result.output);
+        if (result.success && !failureReason) {
+          return { success: true, result: result.output };
+        }
+
+        lastError = failureReason || result.error || 'Unknown error';
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    return { success: false, result: { error: lastError }, error: lastError };
+  }
+
+  private async executeInProcessTask(
+    agent: Agent,
+    taskId: string,
+    metadata: Record<string, unknown>
+  ): Promise<{ success: boolean; output: unknown; error?: string }> {
+    const agentTask: AgentTask = {
+      taskId,
+      agentId: agent.id,
+      dependencies: [],
+      status: 'pending',
+      result: metadata,
+      startedAt: Date.now(),
+    };
+
+    try {
+      const output = await this.executeAgentTask(agentTask);
+      const failureReason = this.detectFailure(output);
+      return {
+        success: !failureReason,
+        output,
+        error: failureReason || undefined,
+      };
+    } catch (error) {
+      return { success: false, output: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async executeIsolatedTask(
+    agentType: AgentType,
+    taskId: string,
+    metadata: Record<string, unknown>,
+    attempt: number,
+    maxRetries: number
+  ): Promise<SubagentResult> {
+    await this.subagentCoordinator.initialize();
+
+    const task: SubagentTaskDefinition = {
+      id: taskId,
+      agentType,
+      description: metadata.prompt ? String(metadata.prompt) : 'Autonomous task',
+      projectPath: metadata.projectPath ? String(metadata.projectPath) : undefined,
+      metadata,
+      createdAt: Date.now(),
+      attempt,
+      maxRetries,
+    };
+
+    const session = await this.subagentCoordinator.spawn(task);
+    await this.subagentCoordinator.markRunning(session.id);
+
+    return this.subagentCoordinator.waitForResult(session, 10 * 60 * 1000);
+  }
+
+  /**
+   * Execute a workflow in isolated subagents
+   */
+  private async executeWorkflowWithIsolation(workflow: AgentWorkflow): Promise<void> {
+    workflow.status = 'running';
+    workflow.startedAt = Date.now();
+
+    const completed = new Set<string>();
+    let remainingAttempts = workflow.tasks.length;
+    let lastPass = false;
+
+    while (!lastPass && remainingAttempts > 0) {
+      lastPass = true;
+
+      for (const task of workflow.tasks) {
+        if (completed.has(task.taskId)) continue;
+
+        const depsMet = task.dependencies.every(dep => completed.has(dep));
+        if (!depsMet) continue;
+
+        lastPass = false;
+        const agent = this.getAgent(task.agentId);
+        if (!agent) {
+          task.status = 'failed';
+          task.result = { error: 'Agent not found' };
+          completed.add(task.taskId);
+          continue;
+        }
+
+        task.status = 'running';
+        task.startedAt = Date.now();
+        const metadata = (task.result && typeof task.result === 'object') ? task.result as Record<string, unknown> : {};
+        const result = await this.executeIsolatedTask(agent.type, task.taskId, metadata, 1, 0);
+        task.result = result.output;
+        task.status = result.success ? 'completed' : 'failed';
+        task.completedAt = Date.now();
+        completed.add(task.taskId);
+      }
+
+      remainingAttempts--;
+    }
+
+    workflow.status = workflow.tasks.some(task => task.status === 'failed') ? 'failed' : 'completed';
+    workflow.completedAt = Date.now();
+  }
+
+  /**
    * Create an autonomous workflow from a Decision
    */
   async createAutonomousWorkflow(decision: {
@@ -1044,6 +1293,52 @@ export class AgentOrchestrator {
 
   private generateTaskId(): string {
     return `agent-task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  }
+
+  private estimateDurationForAgent(agentType?: AgentType): number {
+    switch (agentType) {
+      case 'scout':
+        return 2 * 60 * 1000;
+      case 'builder':
+        return 10 * 60 * 1000;
+      case 'reviewer':
+        return 4 * 60 * 1000;
+      case 'tester':
+        return 6 * 60 * 1000;
+      case 'deployer':
+        return 8 * 60 * 1000;
+      default:
+        return 3 * 60 * 1000;
+    }
+  }
+
+  private detectFailure(output: unknown): string | null {
+    if (!output || typeof output !== 'object') return null;
+    const record = output as Record<string, unknown>;
+    const status = typeof record.status === 'string' ? record.status.toLowerCase() : '';
+    if (status === 'error' || status === 'failed') {
+      return typeof record.error === 'string' ? record.error : 'Task reported error status';
+    }
+    if (typeof record.error === 'string' && record.error.trim()) {
+      return record.error;
+    }
+    if (typeof record.exitCode === 'number' && record.exitCode !== 0) {
+      return `Task exited with code ${record.exitCode}`;
+    }
+    return null;
+  }
+
+  // ===========================================
+  // Template Helpers
+  // ===========================================
+
+  async listTemplates(): Promise<string[]> {
+    return listAgentTemplates();
+  }
+
+  async getTemplate(name: string): Promise<string | null> {
+    const template = await loadAgentTemplate(name);
+    return template?.content ?? null;
   }
 }
 
