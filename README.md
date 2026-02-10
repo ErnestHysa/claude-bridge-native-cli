@@ -1,611 +1,67 @@
 # Claude Bridge Native CLI
 
-A Telegram bot that bridges Claude Code CLI with Telegram messaging, allowing you to interact with Claude through your mobile device.
+Claude Bridge Native CLI is a TypeScript Telegram bot that lets you run Claude Code workflows from Telegram while preserving project context, memory, automation, and recovery state between restarts.
 
-## Features
+## What this version includes
 
-### Core Bot Features
-- **Full Claude Code CLI Access**: Interact with Claude through Telegram messages
-- **Project Management**: Auto-scan and manage multiple projects
-- **Session Management**: Per-chat session state with conversation history
-- **Git Integration**: See branch and status for Git repositories
-- **File Edit Approval**: Configurable approval for dangerous operations
-- **Graceful Shutdown**: Proper cleanup of active processes
+- Telegram chat bridge to local `claude` CLI execution.
+- Multi-project management with auto-discovery and Git metadata.
+- Per-chat sessions with cancellation and idle-session cleanup.
+- Persistent "brain" subsystems (memory, tasks, automations, plugins, approvals, recovery, metrics, SQLite).
+- Agentic workflows for docs, dependencies, refactors, features, CI/CD checks, and autonomous intentions/decisions.
+- Setup wizard + user identity/preferences persistence.
 
-### Memory & Context
-- **Persistent Memory Store**: Store and retrieve facts, decisions, and patterns across sessions
-- **Semantic Search**: Vector-based embedding search for context-aware memory retrieval
-- **Code Indexing**: Automatic project structure understanding with file/symbol tracking
-- **Context Awareness**: Project-specific context isolation and tracking
+## Quick start
 
-### Task & Agent System
-- **Background Tasks**: Queue and manage tasks with priority scheduling
-- **Multi-Agent System**: Coordinate specialized agents (Scout, Builder, Reviewer, Tester, Deployer)
-- **Smart Git Operations**: Auto-generated commit messages and PR descriptions
-- **Parallel Execution**: Run multiple agents simultaneously for complex tasks
-
-### Autonomous AI
-- **Intention Engine**: Proactive detection of improvement opportunities
-- **Decision System**: Autonomous decision-making with user approval workflow
-- **Goal Tracking**: Define high-level objectives and track progress automatically
-- **Opportunity Scanner**: Continuous scanning for code quality improvements
-- **Test Healer**: Self-healing system for automatic test failure detection and fixing
-- **Dependency Manager**: Automated dependency updates with security checks
-- **Refactoring Agent**: Autonomous code refactoring with rollback capability
-
-### Data Persistence (NEW)
-- **Winston Logging**: Structured logging to files with daily rotation
-- **Metrics Tracking**: Daily metrics that persist across restarts
-- **Checkpoint System**: Periodic state snapshots every 30 seconds
-- **SQLite Database**: Critical data storage (sessions, tasks, audit, decisions)
-- **Crash Recovery**: Automatic detection and recovery from unclean shutdowns
-- **Data Export**: Export all data for backup or analysis
-
-### Self-Improvement
-- **Code Analysis**: Complexity analysis, security scanning, duplication detection
-- **Pattern Learning**: Automatic detection of coding patterns and conventions
-- **Daily Briefings**: Weather, activity recap, GitHub activity, project ideas
-- **Proactive Checks**: Unpushed commits, stuck tasks, code quality alerts
-- **Learning Log**: Tracks mistakes and improvements over time
-
-### Identity & Personalization
-- **Setup Wizard**: Interactive first-time setup for personalized experience
-- **Customizable Personality**: Define bot communication style and behavior
-- **User Preferences**: Timezone, coding conventions, preferred languages
-- **Notification Management**: Priority-based routing with quiet hours
-
-## Brain System - AI-Powered Development Assistant
-
-This project has evolved into a sophisticated AI development assistant with a comprehensive brain system that provides:
-
-### Core Brain Features
-
-- **Persistent Memory Store**: Store and retrieve facts, decisions, and patterns across sessions with semantic search
-- **Vector Store**: Embedding-based semantic search for context-aware memory retrieval
-- **Multi-Agent System**: Coordinate specialized AI agents (Scout, Builder, Reviewer, Tester, Deployer)
-- **Task Queue**: Create and manage background tasks with priority scheduling and parallel execution
-- **Context Indexer**: Automatically index and understand project structure
-- **Git Automation**: Smart commits, PR management, and deployment operations
-- **Identity Management**: Customizable agent personality and user preferences
-- **Setup Wizard**: Interactive first-time setup for personalized experience
-- **Streaming Output**: Real-time Claude responses streamed to Telegram
-- **Flexible Timeout**: Configure Claude process timeout (0 = unlimited)
-
-### Advanced Brain Capabilities
-
-- **Code Analyzer**: Complexity analysis, security scanning, duplication detection
-- **Pattern Learner**: Automatic detection of coding patterns and conventions
-- **Notification Router**: Priority-based notification routing with quiet hours
-- **Background Workers**: Heartbeat monitoring, daily briefings, proactive checks
-- **Project Context Tracking**: Per-project memory and context isolation
-- **Session Persistence**: All sessions survive restarts with full state restoration
-- **Self-Improvement System**: Continuous learning from interactions and outcomes
-
-### 🆕 Data Persistence System (NEW)
-
-The application now includes comprehensive persistence that survives restarts:
-
-- **Winston Logging**: Structured logging to files with daily rotation
-  - Logs stored in `brain/logs/` (app, error, audit)
-  - Automatic rotation (30 days for app, 90 days for errors, 1 year for audit)
-  - Clean log formatting with timestamps and metadata
-
-- **Metrics Tracking**: Daily metrics that persist across restarts
-  - Tasks completed/failed, Claude queries, files modified
-  - Stored in `brain/metrics/{date}.json`
-  - Automatically tracked during bot operation
-
-- **Checkpoint System**: Periodic state snapshots every 30 seconds
-  - Stored in `brain/checkpoints/`
-  - Captures sessions, metrics, brain state
-  - Automatic recovery on startup after unclean shutdown
-
-- **SQLite Database**: Critical data stored in relational database
-  - Sessions, tasks, audit logs, decisions
-  - Located at `brain/database/claude-bridge.db`
-  - Supports full CRUD operations and data export
-
-- **Recovery System**: Detects and recovers from crashes
-  - Heartbeat file updated every 5 seconds
-  - Crash reports created on unclean shutdown
-  - Automatic state restoration on startup
-
-### Autonomous AI Systems
-
-- **Intention Engine**: Converts events, patterns, and context into actionable intentions
-- **Decision Maker**: Evaluates intentions and makes autonomous decisions based on goals and permissions
-- **Approval Workflow**: Interactive approval system with Telegram inline buttons for autonomous actions
-- **Feature Workflow**: End-to-end feature implementation automation from specification to PR
-- **Context Tracker**: Real-time project state monitoring with health scores and trends
-- **Goal System**: User-defined objectives with progress tracking and autonomous execution
-- **Opportunity Detector**: Continuous scanning for improvements (refactoring, tests, dependencies)
-- **Test Healer**: Self-healing system for automatic test failure detection and fixing
-- **Dependency Manager**: Automated dependency updates with security and compatibility checks
-- **Refactoring Agent**: Autonomous code refactoring with quality gates and rollback capability
-- **Transparency Tracker**: Complete audit trail for all autonomous AI actions
-- **Permission Manager**: Fine-grained permission system for autonomous operations
-- **Rollback Manager**: Automatic rollback capability for failed autonomous changes
-
-### Autonomous AI Vision
-
-The brain system is designed to evolve into a fully autonomous AI assistant that can:
-- Initiate actions proactively based on events, time, and patterns
-- Self-heal by fixing test failures and managing dependencies
-- Work toward user-defined goals with transparency
-- Learn from every interaction to improve over time
-
-## Setup
-
-### Prerequisites
-
-- Node.js 18+
-- Claude Code CLI installed globally
-- Telegram Bot Token (get from [@BotFather](https://t.me/botfather))
-
-### Installation
-
-1. Clone and install dependencies:
-```bash
-cd C:\Users\ErnestHome\DEVPROJECTS\claude-bridge-native-cli
-npm install
-```
-
-2. Copy `.env.example` to `.env` and configure:
-```bash
-cp .env.example .env
-```
-
-3. Edit `.env` with your settings:
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_BOT_USERNAME=your_bot_username_here
-ALLOWED_USERS=ernest,username1,username2
-ALLOWED_USER_IDS=123456789,987654321
-
-PROJECTS_BASE=C:\Users\ErnestHome\DEVPROJECTS
-```
-
-### Development
+1. Follow [`setup.md`](./setup.md).
+2. Start the bot:
 
 ```bash
-npm run dev          # Run with tsx watch
-npm run build        # Compile TypeScript
-npm run start        # Run compiled output
-npm run typecheck    # Type check only
-npm run lint         # Lint code
+npm run dev
 ```
 
-## Usage
+3. In Telegram: `/start` then `/help`.
 
-### Telegram Commands
+## Command surface (high level)
 
-#### Core Commands
-- `/start` - Initialize the bot or begin setup wizard
-- `/projects` - List all available projects
-- `/select` - Select a project with inline keyboard
-- `/addproject <path>` - Add a project by absolute path
-- `/rmproject <name>` - Remove a project
-- `/rescan` - Rescan the projects directory
-- `/status` - Show current session info
-- `/cancel` - Cancel current operation
-- `/help` - Show help message
+### Core bot
+`/start`, `/help`, `/projects`, `/select`, `/addproject`, `/rmproject`, `/rescan`, `/status`, `/cancel`.
 
-#### Memory & Context Commands
-- `/remember <key> <value>` - Store information in persistent memory
-- `/recall <query>` - Search and retrieve from memory
-- `/semantic <query>` - Semantic memory search using embeddings
-- `/context` - View current project context and structure
-- `/index <path>` - Index project for context awareness
-- `/search <query>` - Search indexed code
-- `/file <path>` - Get detailed info about a specific file
+### Brain and workflow
+`/remember`, `/recall`, `/semantic`, `/context`, `/index`, `/search`, `/file`, `/task`, `/tasks`, `/agent`, `/agents`, `/git`, `/history`, `/metrics`, `/profile`, `/schedule`, `/schedules`, `/watch`, `/notifications`, `/analyze`, `/learn`, `/plugins`.
 
-#### Task Management Commands
-- `/task <description> [--bg]` - Create a background task
-- `/tasks` - List all active and queued tasks
-- `/schedule "<cron>" <task>` - Schedule a recurring task
-- `/schedules` - List all scheduled tasks
+### Advanced automation
+`/docs`, `/dependencies`, `/feature`, `/refactor`, `/cicd`, `/heartbeat`, `/briefing`, `/checks`, `/selfreview`, `/intentions`, `/decisions`, `/goals`, `/autonomous`, `/inactivehours`, `/continue`, `/handoff`, `/permissions`, `/setautonomousprefs`, `/approve`, `/deny`, `/logs`, `/state`, `/recovery`, `/export`.
 
-#### Agent Commands
-- `/agent <type> <prompt>` - Run a specific agent
-- `/agents` - Show running agents and their status
+For examples and usage notes, see [`GUIDE.md`](./GUIDE.md).
 
-**Available Agent Types:**
-- `scout` - Explores codebase, finds patterns, analyzes architecture
-- `builder` - Writes code, implements features, refactors code
-- `reviewer` - Reviews for bugs, security issues, best practices
-- `tester` - Runs tests, analyzes coverage, generates test data
-- `deployer` - Handles deployments, rollbacks, CI/CD operations
+## Architecture overview
 
-#### Git Commands
-- `/git commit` - Smart commit with auto-generated message
-- `/git status` - Show git status
-- `/git log` - Show recent commits
-- `/git pr` - Generate pull request description
+- `src/index.ts`: app bootstrap, session cleanup timer, graceful shutdown.
+- `src/telegram-bot.ts`: Telegram command routing + chat workflows.
+- `src/claude-spawner.ts`: safe process spawning of `claude --print` with streaming output.
+- `src/session-manager.ts`: per-chat session lifecycle and active process tracking.
+- `src/project-manager-class.ts` and `src/project-manager.ts`: discovery, Git status, project selection.
+- `src/brain/**`: persistence, memory/vector search, tasks, automations, orchestration, approvals, recovery, dashboards, plugins.
 
-#### Information Commands
-- `/metrics` - Show performance metrics and statistics
-- `/profile` - View your profile and preferences
+## Runtime data
 
-#### Self-Improvement Commands
-- `/heartbeat` - Manually trigger a heartbeat check
-- `/briefing` - Generate the daily briefing
-- `/checks` - Run proactive checks
-- `/selfreview` - View learning log from self-improvement system
+The app creates runtime state under `brain/` (logs, memory, tasks, sessions, automations, DB, checkpoints, recovery heartbeat/crash reports, plugin state).
 
-#### Autonomous AI Commands
-- `/goals [action]` - List all active goals or manage (use `create:<type>`, `complete:<id>`, `list`)
-- `/intentions [filter]` - View active intentions
-- `/autonomous <on/off>` - Toggle autonomous mode
-- `/decisions [filter]` - View recent autonomous decisions
-- `/permissions [level]` - View or set permission level
-- `/approve <id>` - Approve a pending action
-- `/deny <id> [reason]` - Deny a pending action
+## Scripts
 
-### Workflow
-
-1. Use `/start` to initialize your session (first-time users will go through setup wizard)
-2. Use `/select` to choose a project
-3. Send your prompt as a regular message
-4. Claude processes and responds with streaming output
-5. File edits may require approval (configurable)
-
-#### Advanced Workflows with Brain System
-
-**Starting a New Project:**
-```
-1. /addproject C:\path\to\project
-2. /select (choose the project)
-3. /index (let it scan the codebase)
-4. Start working: "Help me understand the authentication flow"
+```bash
+npm run dev        # run in watch mode (tsx)
+npm run build      # compile TypeScript
+npm run start      # run compiled output
+npm run typecheck  # TypeScript type-check only
+npm run lint       # ESLint
+npm run test       # Vitest
 ```
 
-**After Making Important Decisions:**
-```
-/remember We implemented JWT with refresh tokens
-/remember Frontend uses React, backend uses FastAPI
-/remember All API responses follow {success, data, error} format
-```
+## Documentation map
 
-**Before Big Refactors:**
-```
-1. /task Analyze dependencies for refactor --bg
-2. /agent scout Find all uses of the old API
-3. Do the work
-4. /git commit
-```
-
-**Daily Productivity:**
-```
-/status   → See what's active
-/metrics  → See what you accomplished
-/tasks    → Check background tasks
-/briefing → Get daily briefing with weather and activity
-```
-
-**When Stuck:**
-```
-/search <keyword>    → Find related code
-/context             → See what's been decided
-/recall <topic>      → Find what you remembered
-/semantic <query>    → Semantic search through memory
-```
-
-**Autonomous Development:**
-```
-1. /goals create:quality (define an objective)
-2. /autonomous on (enable autonomous mode)
-3. /intentions (see what's planned)
-4. /decisions (review and approve actions)
-5. /metrics (see what was accomplished)
-```
-
-## Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `TELEGRAM_BOT_TOKEN` | - | Bot token from BotFather |
-| `TELEGRAM_BOT_USERNAME` | - | Bot username |
-| `ALLOWED_USER_IDS` | - | Comma-separated allowed user IDs |
-| `PROJECTS_BASE` | `C:\Users\ErnestHome\DEVPROJECTS` | Base directory for projects |
-| `AUTO_SCAN_INTERVAL_MS` | 300000 | Project rescan interval (5 min) |
-| `CLAUDE_DEFAULT_MODEL` | `claude-3-5-sonnet` | Default Claude model |
-| `CLAUDE_PERMISSION_MODE` | `acceptEdits` | Permission mode for file edits |
-| `CLAUDE_TIMEOUT_MS` | 0 | Claude process timeout (0 = unlimited) |
-| `SESSION_TIMEOUT_MS` | 3600000 | Session idle timeout (1 hour) |
-| `MAX_CONCURRENT_SESSIONS` | 5 | Maximum concurrent sessions |
-| `AUTO_APPROVE_SAFE_EDITS` | true | Auto-approve safe edits |
-| `REQUIRE_APPROVAL_FOR_DELETES` | true | Require approval for deletes |
-| `MASS_CHANGE_THRESHOLD` | 5 | Files count for "mass change" |
-| `LOG_LEVEL` | `info` | Logging level |
-
-### Brain System Configuration
-
-The brain system stores data in the `./brain` directory with the following structure:
-
-```
-brain/
-├── identity/              # Agent identity, personality, and user preferences
-│   ├── profile.json       # User profile (name, timezone, etc)
-│   ├── personality.json   # Bot personality settings
-│   └── preferences.json   # User preferences and settings
-├── memory/                # Persistent memory store
-│   ├── knowledge/         # Stored facts and decisions
-│   └── vector-store.ts    # Embedding-based semantic search
-├── sessions/              # Persistent chat sessions
-├── projects/              # Project-specific context and tracking
-├── heartbeats/            # System health monitoring data
-├── learning/              # Pattern learning and improvement data
-├── notifications/         # Notification routing and preferences
-├── analyzer/              # Code analysis tools and results
-├── scripts/               # Background workers and automation
-├── errors/                # Error tracking and analysis
-├── approval/              # Approval workflow system
-├── briefing/              # Morning briefing system
-├── context-tracker/       # Real-time project state monitoring
-├── decision/              # Autonomous decision making
-├── dependency/            # Dependency management
-├── feature/               # Feature workflow automation
-├── feedback/              # User feedback collection
-├── goals/                 # Goal system and tracking
-├── intention/             # Intention engine
-├── opportunity/           # Opportunity detection
-├── permission/            # Permission management
-├── refactoring/           # Autonomous refactoring
-├── rollback/              # Rollback management
-├── self-healing/          # Test healing system
-└── transparency/          # Action audit trail
-```
-
-### Agent Types
-
-The brain system includes several specialized agent types:
-
-- **Scout**: Explores codebases, finds patterns, analyzes architecture, and creates project maps
-- **Builder**: Writes code, implements features, refactors code, and applies patterns
-- **Reviewer**: Reviews code for bugs, security issues, and best practices
-- **Tester**: Creates tests, runs test suites, analyzes coverage, and generates test data
-- **Deployer**: Handles deployments, rollbacks, and CI/CD operations
-
-### Multi-Agent Orchestration
-
-The Agent Orchestrator coordinates multiple agents to work on complex tasks:
-
-- **Workflow Chains**: Agents can work in dependency chains
-- **Parallel Processing**: Multiple agents can run simultaneously
-- **Intelligent Task Assignment**: Routes tasks to the most appropriate agent
-- **Memory Integration**: All agents share persistent memory and learned patterns
-
-## Architecture
-
-```
-┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│  Telegram   │─────▶│  Bot Handler │─────▶│  Session    │
-│     App     │      │              │      │  Manager    │
-└─────────────┘      └──────────────┘      └─────────────┘
-                            │                      │
-                            ▼                      ▼
-                     ┌──────────────┐      ┌─────────────┐
-                     │   Project    │      │   Claude    │
-                     │   Manager    │      │   Spawner   │
-                     └──────────────┘      └─────────────┘
-                            │                      │
-                            └──────────┬───────────┘
-                                       ▼
-                                ┌─────────────┐
-                                │ Claude Code │
-                                │     CLI     │
-                                └─────────────┘
-
-                     Brain System Layer (New)
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│   Memory    │  │   Tasks     │  │   Agents    │
-│   Store     │  │   Queue     │  │Orchestrator │
-└─────────────┘  └─────────────┘  └─────────────┘
-       │                │                │
-       └────────────────┴────────────────┘
-                        │
-                        ▼
-                ┌─────────────┐
-                │  Identity   │
-                │  Manager    │
-                └─────────────┘
-```
-
-## File Operations Approval
-
-- **Read operations**: Auto-approved
-- **Single file edits**: Auto-approved (configurable)
-- **Delete operations**: Always require approval
-- **Mass changes** (5+ files): Require approval
-
-## Troubleshooting
-
-### Bot doesn't respond
-- Check `TELEGRAM_BOT_TOKEN` is correct
-- Ensure user is in `ALLOWED_USERS` or `ALLOWED_USER_IDS`
-
-### Claude process times out
-- Set `CLAUDE_TIMEOUT_MS` to `0` for unlimited execution time
-- Check Claude CLI is installed and accessible
-- Verify project path is correct
-
-### Projects not found
-- Verify `PROJECTS_BASE` path exists
-- Use `/rescan` to refresh project list
-
-### Brain system not working
-- Check that `./brain` directory is writable
-- Ensure brain system initialized: `/start` command triggers initialization
-- Review logs in `./brain/logs/` for errors
-
-### Streaming output not working
-- Verify `onOutput` callback is properly configured in spawner
-- Check that Claude CLI supports streaming output format
-- Review network connectivity to Telegram API
-
-## Brain System API
-
-The brain system provides a comprehensive API for building intelligent, persistent bot behavior.
-
-### Memory Store
-
-```typescript
-import { getMemoryStore } from './brain/index.js';
-
-const memory = getMemoryStore();
-
-// Store a fact
-await memory.setFact('project:architecture', 'microservices');
-
-// Store a decision
-await memory.setDecision({
-  id: 'dec-001',
-  title: 'Use TypeScript for backend',
-  description: 'Chose TS for type safety',
-  rationale: 'Reduces runtime errors'
-});
-
-// Search memory
-const results = await memory.search('architecture');
-```
-
-### Task Queue
-
-```typescript
-import { getTaskQueue } from './brain/index.js';
-
-const queue = getTaskQueue();
-
-// Add a task
-const taskId = await queue.addTask({
-  type: 'code_refactor',
-  title: 'Refactor auth module',
-  description: 'Improve error handling',
-  priority: 'medium',
-  chatId: 123456
-});
-
-// Get task status
-const task = await queue.getTask(taskId);
-```
-
-### Git Automation
-
-```typescript
-import { getGitAutomation } from './brain/index.js';
-
-const git = getGitAutomation();
-
-// Smart commit with auto-generated message
-const result = await git.smartCommit(projectPath, {
-  autoStage: true,
-  conventionalCommits: true,
-  push: false
-});
-
-// Create PR draft
-const pr = await git.createPRDraft(projectPath, 'feature-branch');
-```
-
-### Identity Management
-
-```typescript
-import { getIdentityManager } from './brain/index.js';
-
-const identity = getIdentityManager();
-
-// Update agent personality
-await identity.updatePersonality({
-  communication: {
-    style: 'concise',
-    tone: 'professional',
-    useEmojis: false,
-    codeBlocks: true
-  },
-  coding: {
-    languages: ['TypeScript', 'Python'],
-    conventions: {
-      quoteStyle: 'single',
-      semicolons: true,
-      trailingCommas: true,
-      spacing: 2
-    }
-  }
-});
-```
-
-## Development Roadmap
-
-### Completed ✅
-- [x] Multi-agent system with specialized agents
-- [x] Persistent memory with semantic search
-- [x] Git automation with smart commits
-- [x] Task queue with background processing
-- [x] Context indexer for code understanding
-- [x] Identity management and setup wizard
-- [x] Code analyzer with complexity scoring
-- [x] Pattern learning system
-- [x] Notification routing with priorities
-- [x] Background workers and automation
-- [x] Intention engine for autonomous actions
-- [x] Decision maker for evaluating intentions
-- [x] Approval workflow with interactive approvals
-- [x] Feature workflow for end-to-end automation
-- [x] Context tracker for project health monitoring
-- [x] Goal system for objective tracking
-- [x] Opportunity detector for continuous improvement
-- [x] Test healer for self-healing tests
-- [x] Dependency manager for automated updates
-- [x] Refactoring agent for autonomous refactoring
-- [x] Transparency tracker for audit trails
-- [x] Permission manager for fine-grained control
-- [x] Rollback manager for safe autonomous changes
-
-### In Progress 🚧
-- [ ] Enhanced autonomous AI capabilities
-- [ ] Self-healing test failure recovery
-- [ ] Proactive dependency management
-- [ ] Goal-driven autonomous development
-- [ ] Feature workflow automation
-
-### Planned 📋
-- [ ] Multi-user support with isolated brain instances
-- [ ] Plugin system for custom agent types
-- [ ] Web dashboard for brain system visualization
-- [ ] Integration with external memory services (Redis, SQLite)
-- [ ] Advanced workflow orchestration with dependencies
-- [ ] Real-time collaboration features
-- [ ] Voice input/output support
-- [ ] Integration with more Git providers
-- [ ] Custom agent training on user codebase
-
-See `brain/AUTONOMOUS_AI_PLAN.md` for the detailed vision of the autonomous AI system.
-
-## Additional Documentation
-
-- **[GUIDE.md](GUIDE.md)** - Comprehensive command reference and usage guide with detailed examples
-- **[brain/AUTONOMOUS_AI_PLAN.md](brain/AUTONOMOUS_AI_PLAN.md)** - Vision for autonomous AI capabilities
-- **[brain/HEARTBEAT.md](brain/HEARTBEAT.md)** - Heartbeat monitoring system documentation
-- **[brain/MORNING-BRIEFING.md](brain/MORNING-BRIEFING.md)** - Daily briefing system documentation
-- **[brain/PROACTIVE-CHECKS.md](brain/PROACTIVE-CHECKS.md)** - Proactive monitoring system documentation
-
-## Key Differentiators
-
-What makes this project unique:
-
-1. **Proactive Intelligence**: Unlike traditional bots, this system anticipates needs and can initiate actions
-2. **Persistent Memory**: Remembers past decisions, patterns, and context across sessions
-3. **Multi-Agent Coordination**: Multiple specialized AI agents work together on complex tasks
-4. **Semantic Understanding**: Vector-based memory enables context-aware responses
-5. **Autonomous Operations**: Can perform tasks without direct commands through scheduled tasks
-6. **Continuous Learning**: Improves from every interaction through pattern learning
-7. **Project Awareness**: Understands codebase structure through intelligent indexing
-8. **Mobile Development**: Full Claude Code capabilities from your mobile device via Telegram
-9. **Goal-Driven Development**: Define high-level objectives and let AI work toward them autonomously
-10. **Self-Healing**: Automatically detects and fixes test failures
-11. **Complete Transparency**: Full audit trail of all autonomous actions with approval workflow
-12. **Continuous Improvement**: Scans for opportunities to improve code quality, test coverage, and dependencies
-
-## License
-
-MIT
+- [`setup.md`](./setup.md): full local setup, configuration, and verification.
+- [`GUIDE.md`](./GUIDE.md): command reference and practical workflows.
+- [`example_usecase.md`](./example_usecase.md): end-to-end scenario.
+- [`docs/`](./docs): engineering audits/plans from upgrade phases.

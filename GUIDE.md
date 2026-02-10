@@ -1,565 +1,124 @@
-# Claude Bridge CLI - Command Guide
+# User Guide (Current Version)
+
+This guide reflects the upgraded bot/brain architecture in `src/`.
+
+## Core usage flow
+
+1. `/start`
+2. `/projects` (or `/addproject <absolute-path>`)
+3. `/select`
+4. Send natural-language prompt (non-command text) to run Claude in selected project
+5. Use `/cancel` for long-running jobs
+
+## Command reference
+
+## 1) Core bot
+
+- `/start` - initialize chat session and setup wizard when needed
+- `/help` - full command list
+- `/projects` - list discovered projects
+- `/select` - pick active project
+- `/addproject <path>` - add project manually
+- `/rmproject <name>` - remove project
+- `/rescan` - rescan base directory
+- `/status` - session + project + process status
+- `/cancel` - stop active Claude process
+
+## 2) Memory and context
+
+- `/remember <key> <value>`
+- `/recall <query>`
+- `/semantic <query>`
+- `/context`
+- `/index [project-path]`
+- `/search <query>`
+- `/file <relative-path>`
+
+## 3) Tasking and agents
+
+- `/task <description> [--bg]`
+- `/tasks`
+- `/agent <type> <task>`
+- `/agents`
+- `/history <query>`
+
+## 4) Git and delivery
+
+- `/git <status|log|commit|...>`
+- `/cicd <status|add|remove|builds|...>`
+- `/docs <...>`
+- `/dependencies <...>`
+- `/feature <...>`
+- `/refactor <...>`
+
+## 5) Health, persistence, and observability
+
+- `/metrics`
+- `/logs [app|error|audit] [lines]`
+- `/state`
+- `/recovery`
+- `/export`
+- `/heartbeat`
+- `/briefing`
+- `/checks`
+- `/selfreview`
+
+## 6) Preferences, plugins, and automation
+
+- `/profile`
+- `/schedule`
+- `/schedules`
+- `/automation`
+- `/automations`
+- `/watch [project]`
+- `/notifications <...>`
+- `/analyze`
+- `/learn`
+- `/plugins [list|run ...]`
+
+## 7) Autonomous mode & approvals
+
+- `/intentions [filter]`
+- `/decisions [filter]`
+- `/goals [action]`
+- `/autonomous <on|off|status>`
+- `/inactivehours <...>`
+- `/continue [target]`
+- `/handoff [summary]`
+- `/permissions [level]`
+- `/setautonomousprefs <...>`
+- `/approve <id>`
+- `/deny <id> [reason]`
+
+## Typical workflows
+
+### A) Daily coding from phone
+
+1. `/select`
+2. Ask: “review auth module and suggest simplification”
+3. `/task refactor auth middleware --bg`
+4. `/tasks` to monitor
+5. `/git status` and `/git commit`
 
-A comprehensive guide to all commands for interacting with Claude Code through Telegram.
+### B) Project onboarding
 
----
+1. `/addproject /absolute/path`
+2. `/remember current-project /absolute/path`
+3. `/index`
+4. `/search entrypoint`
+5. `/file src/index.ts`
 
-## Quick Start
+### C) Autonomous review loop
 
-```
-/start      → Initialize the bot
-/projects   → See available projects
-/select     → Choose a project to work on
-```
+1. `/permissions supervised`
+2. `/autonomous on`
+3. `/intentions`
+4. `/decisions`
+5. `/approve <id>` or `/deny <id> reason`
 
-Then just send your prompts as messages: `"Refactor the auth module"`
+## Safety notes
 
----
-
-## Core Commands
-
-### `/start`
-Initialize the bot and create your profile.
-**Run once** when first setting up.
-
-### `/projects`
-List all available projects.
-**Use:** When you want to see what projects are configured.
-
-### `/select`
-Select a project with inline keyboard.
-**Use:** At the start of each session to choose your active project.
-
-### `/addproject <path>`
-Add a project by absolute path.
-**Example:** `/addproject C:\Users\Name\my-project`
-**Use:** When setting up a new project.
-
-### `/rmproject <name>`
-Remove a project.
-**Example:** `/rmproject my-project`
-
-### `/rescan`
-Rescan the projects directory for new projects.
-
-### `/status`
-Show current session and project info.
-**Shows:** Active project, Claude process status, conversation length.
-
-### `/cancel`
-Cancel the current Claude operation.
-**Use:** When you want to stop a long-running request.
-
-### `/help`
-Show detailed help message.
-
----
-
-## Brain Commands 🧠
-
-### `/remember <key> <value>`
-Store something in memory for future sessions.
-
-**Examples:**
-```
-/remember api-key Use sk-1234 for dev environment
-/remember decision We chose PostgreSQL over MongoDB
-/remember pattern Always use Zod for validation
-/remember frontend React with Tailwind CSS
-```
-
-**When to use:**
-- After making architectural decisions
-- When setting preferences
-- To document important conventions
-
----
-
-### `/recall <query>`
-Search stored memories.
-
-**Examples:**
-```
-/recall api-key
-/recall PostgreSQL
-/recall validation
-```
-
-**When to use:** To find what you previously told the bot to remember.
-
----
-
-### `/index <path>`
-Index project for context awareness.
-
-**Examples:**
-```
-/index                      → Index current project
-/index C:\Users\Name\project → Index specific project
-```
-
-**What it does:**
-- Scans all files in your project
-- Tracks functions, classes, exports, imports
-- Builds a dependency graph
-- Enables `/search` and `/file` commands
-
-**When to use:**
-- First time working on a project
-- After major code changes
-- Before starting a complex task
-
----
-
-### `/search <query>`
-Search indexed code.
-
-**Examples:**
-```
-/search authenticate
-/search Database
-/search User
-/search config
-```
-
-**When to use:** After running `/index`, to quickly find files/symbols related to your query.
-
----
-
-### `/file <path>`
-Get detailed info about a specific file.
-
-**Examples:**
-```
-/file src/auth/login.ts
-/file components/Button.tsx
-/file lib/db.ts
-```
-
-**Shows:**
-- Language
-- Line count
-- Imports
-- Exports (functions, classes, types)
-
----
-
-### `/context`
-View project context and decisions.
-
-**Shows:**
-- Project name and path
-- Recent architectural decisions
-- Learned patterns
-- Tech stack
-
-**When to use:** To see what the bot knows about your current project.
-
----
-
-### `/task <description> [--bg]`
-Create a new background task.
-
-**Examples:**
-```
-/task Review all TypeScript files --bg
-/task Write tests for auth module
-/task Update README documentation
-/task Refactor user service
-```
-
-**When to use:** For long-running tasks you want to happen in the background while you continue working.
-
----
-
-### `/tasks`
-List all active tasks.
-
-**Shows:** All pending, in-progress, and completed background tasks.
-
----
-
-### `/agent <type> <task>`
-Run a specialized agent for specific work.
-
-**Examples:**
-```
-/agent scout Find all API endpoints
-/agent builder Create a REST API for users
-/agent reviewer Check for security issues
-/agent tester Write unit tests for auth
-/agent deployer Deploy to staging environment
-```
-
-**Available Agents:**
-| Agent | Purpose |
-|-------|---------|
-| `scout` | Explores codebase, finds patterns |
-| `builder` | Writes and implements code |
-| `reviewer` | Reviews code for bugs/issues |
-| `tester` | Writes and runs tests |
-| `deployer` | Handles deployments |
-
----
-
-### `/agents`
-Show running agents.
-
-**When to use:** Check what specialized agents are currently active.
-
----
-
-### `/git <command>`
-Git operations with AI assistance.
-
-**Examples:**
-```
-/git commit   → Auto-generate commit message and commit
-/git status   → Show git status
-/git log      → Show recent commits
-/git pr       → Generate pull request description
-```
-
-**When to use:** After finishing work, before pushing changes.
-
----
-
-### `/metrics`
-Show today's performance metrics.
-
-**Shows:**
-- Tasks completed/failed
-- Claude queries made
-- Files modified
-- Lines of code changed
-- Active projects
-- Bot uptime
-
-**When to use:** To see what you've accomplished today.
-
----
-
-### `/profile`
-View your profile and preferences.
-
-**Shows:**
-- Bot name and emoji
-- Your username
-- Timezone
-- Communication style
-- Preferred languages
-- Git settings
-
----
-
-### `/schedule "<cron>" <task>`
-Schedule a recurring task with cron.
-
-**Examples:**
-```
-/schedule "0 2 * * *" Run nightly backup
-/schedule "0 */4 * * *" Check server health every 4 hours
-/schedule "0 9 * * 1-5" Morning standup report weekdays
-```
-
-**Cron format:** `minute hour day month weekday`
-
-| Field | Values |
-|-------|--------|
-| minute | 0-59 |
-| hour | 0-23 |
-| day | 1-31 |
-| month | 1-12 |
-| weekday | 0-6 (Sunday=0) |
-
-**Examples:**
-- `0 2 * * *` = 2:00 AM every day
-- `*/30 * * * *` = Every 30 minutes
-- `0 9 * * 1-5` = 9 AM, Monday-Friday
-
----
-
-### `/schedules`
-List all scheduled tasks.
-
----
-
-### `/heartbeat`
-Manually trigger a heartbeat check.
-
-Shows alerts and runs proactive checks on your projects.
-
-### `/briefing`
-Generate the daily briefing manually.
-
-Includes weather, recap, GitHub activity, Twitter digest, project ideas, and error summary.
-
-### `/checks`
-Run proactive checks manually.
-
-Checks for unpushed commits, stuck tasks, and code quality alerts.
-
-### `/selfreview`
-View your learning log from the self-improvement system.
-
-Shows recent mistakes logged by the AI and how it's learning from them.
-
----
-
-## System & Persistence Commands 💾
-
-### `/logs [type] [lines]`
-View recent logs from the system.
-
-**Examples:**
-```
-/logs              → Last 50 app logs
-/logs error        → Last 50 error logs
-/logs audit 100    → Last 100 audit logs
-/logs app 20       → Last 20 app logs
-```
-
-**Log Types:**
-- `app` - General application logs
-- `error` - Error-only logs
-- `audit` - Action audit trail
-
-**When to use:** Debug issues, review system activity, check for errors.
-
----
-
-### `/state`
-View current system state and persistence status.
-
-**Shows:**
-- Checkpoint information (last checkpoint, count, size)
-- Database statistics (sessions, tasks, decisions)
-- Metrics summary (today's activity)
-- System uptime
-
-**When to use:** Check what data is persisted, verify system health.
-
----
-
-### `/recovery`
-View recovery and crash detection information.
-
-**Shows:**
-- Whether unclean shutdown was detected
-- Last heartbeat information
-- Crash reports (if any)
-- Recovery actions taken
-
-**When to use:** After a restart to see if there was a crash, review crash reports.
-
----
-
-### `/export [format]`
-Export data from the system.
-
-**Examples:**
-```
-/export            → Export as JSON
-/export csv        → Export as CSV
-```
-
-**When to use:** Backup data, analyze metrics externally, migrate data.
-
----
-
-## Autonomous AI Commands 🤖
-
-### `/goals [action]`
-Manage goals - list, create, or complete.
-
-**Examples:**
-```
-/goals              → List all goals
-/goals list         → List with details
-/goals create:quality → Create a quality goal
-/goals complete:goal-123 → Mark goal as complete
-```
-
-**Goal Types:**
-- `quality` - Test coverage, complexity reduction
-- `feature` - Implement specific features
-- `maintenance` - Reduce tech debt, update dependencies
-- `learning` - Understand codebase, document patterns
-
-**When to use:** Create and track objectives for autonomous work.
-
----
-
-### `/intentions [filter]`
-View active intentions (planned actions).
-
-**Examples:**
-```
-/intentions         → List all intentions
-/intentions active  → Show only active
-/intentions high    → Show high priority only
-/intentions clear   → Clear expired intentions
-```
-
-**When to use:** See what the AI is planning to work on.
-
----
-
-### `/autonomous <on/off>`
-Toggle autonomous mode.
-
-**Examples:**
-```
-/autonomous on   → Enable autonomous actions
-/autonomous off  → Disable autonomous actions
-```
-
-**When to use:** When you want the AI to take initiative vs only respond to commands.
-
----
-
-### `/permissions [level]`
-View or set permission level.
-
-**Examples:**
-```
-/permissions              → View current level
-/permissions supervised   → Set to supervised mode
-/permissions autonomous   → Set to autonomous mode
-```
-
-**Levels:** `read_only`, `advisory`, `supervised`, `autonomous`, `full`
-
-**When to use:** Control what actions the AI can take without approval.
-
----
-
-### `/decisions [filter]`
-View recent autonomous decisions.
-
-**Examples:**
-```
-/decisions          → All recent decisions
-/decisions pending  → Only pending approval
-/decisions today    → Today's decisions only
-```
-
-**Shows:**
-- Decision ID and type
-- What was decided and why
-- Approval status
-- Outcome
-
-**When to use:** Review what autonomous decisions the AI has made.
-
----
-
-### `/approve <id>`
-Approve a pending action or decision.
-
-**Example:** `/approve decision-123`
-
-**When to use:** Approve autonomous actions that require your consent.
-
----
-
-### `/deny <id> [reason]`
-Deny a pending action or decision.
-
-**Example:** `/deny decision-456 Too risky right now`
-
-**When to use:** Reject autonomous actions you don't want.
-
----
-
-## Typical Workflows
-
-### Starting a New Project
-```
-1. /addproject C:\path\to\project
-2. /select (choose the project)
-3. /index (let it scan the codebase)
-4. Start working: "Help me understand the authentication flow"
-```
-
-### After Making Important Decisions
-```
-/remember We implemented JWT with refresh tokens
-/remember Frontend uses React, backend uses FastAPI
-/remember All API responses follow {success, data, error} format
-```
-
-### Before Big Refactors
-```
-1. /task Analyze dependencies for refactor --bg
-2. /agent scout Find all uses of the old API
-3. Do the work
-4. /git commit
-```
-
-### Daily Check-in
-```
-/status   → See what's active
-/metrics  → See what you accomplished
-/tasks    → Check background tasks
-```
-
-### When Stuck
-```
-/search <keyword>    → Find related code
-/context             → See what's been decided
-/recall <topic>      → Find what you remembered
-```
-
-### Autonomous Development
-```
-1. /goals create:quality (define an objective)
-2. /permissions supervised (set permission level)
-3. /autonomous on (enable autonomous mode)
-4. /intentions (see what's planned)
-5. /decisions (review and approve actions)
-```
-
-### Setting Up Autonomous Goals
-```
-1. /goals create:quality Increase test coverage
-2. /permissions autonomous (set permission level)
-3. /autonomous on (enable autonomous mode)
-4. AI works toward goal automatically
-5. /decisions (review what was done)
-```
-
----
-
-## Command Reference Summary
-
-| Category | Commands |
-|----------|----------|
-| **Core** | `/start`, `/projects`, `/select`, `/addproject`, `/rmproject`, `/rescan`, `/status`, `/cancel`, `/help` |
-| **Memory** | `/remember`, `/recall`, `/context`, `/semantic` |
-| **Code Search** | `/index`, `/search`, `/file` |
-| **Tasks** | `/task`, `/tasks`, `/agent`, `/agents` |
-| **Git** | `/git commit`, `/git status`, `/git log`, `/git pr` |
-| **Info** | `/metrics`, `/profile`, `/schedule`, `/schedules` |
-| **Self-Improvement** | `/watch`, `/notifications`, `/analyze`, `/learn`, `/heartbeat`, `/briefing`, `/checks`, `/selfreview` |
-| **System & Persistence** | `/logs`, `/state`, `/recovery`, `/export` |
-| **Autonomous AI** | `/goals`, `/intentions`, `/autonomous`, `/permissions`, `/decisions`, `/approve`, `/deny` |
-
----
-
-## Tips
-
-1. **Run `/index`** after major code changes to keep the search index fresh
-2. **Use `/remember`** for decisions you'll want to reference later
-3. **Use `--bg`** with `/task` for long-running operations
-4. **Use `/agent scout`** to explore unfamiliar codebases
-5. **Use `/git commit`** for smart, descriptive commit messages
-6. **Enable `/autonomous on`** to let the AI take initiative on improvements
-7. **Set goals with `/goals create:quality`** to guide autonomous work
-8. **Check `/decisions`** regularly to review autonomous actions
-9. **Use `/intentions`** to see what the AI is planning
-10. **Review `/permissions`** to control what the AI can do autonomously
-
----
-
-For issues or questions, check the project repository or run `/help` in the bot.
+- Authorization is enforced via configured user IDs/usernames.
+- Long-running Claude jobs are cancelable.
+- High-risk autonomous actions should stay in supervised/advisory modes unless machine trust boundaries are well controlled.
+- Keep `.env`, logs, and exported state secured.
