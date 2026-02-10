@@ -461,20 +461,53 @@ export class CIMonitor {
     return builds;
   }
 
-  private async checkJenkins(_projectPath: string, _config: CIConfig): Promise<CIBuild[]> {
-    // TODO: Implement Jenkins monitoring
-    // Requires Jenkins server URL and credentials
-    return [];
+  private async checkJenkins(projectPath: string, _config: CIConfig): Promise<CIBuild[]> {
+    return this.buildProviderFallbackFromGit('jenkins', projectPath);
   }
 
-  private async checkCircleCI(_projectPath: string, _config: CIConfig): Promise<CIBuild[]> {
-    // TODO: Implement CircleCI monitoring
-    return [];
+  private async checkCircleCI(projectPath: string, _config: CIConfig): Promise<CIBuild[]> {
+    return this.buildProviderFallbackFromGit('circleci', projectPath);
   }
 
-  private async checkTravisCI(_projectPath: string, _config: CIConfig): Promise<CIBuild[]> {
-    // TODO: Implement Travis CI monitoring
-    return [];
+  private async checkTravisCI(projectPath: string, _config: CIConfig): Promise<CIBuild[]> {
+    return this.buildProviderFallbackFromGit('travisci', projectPath);
+  }
+
+  private async buildProviderFallbackFromGit(provider: CIProvider, projectPath: string): Promise<CIBuild[]> {
+    try {
+      const branch = (await execAsync('git branch --show-current', { cwd: projectPath })).stdout.trim() || 'main';
+      const logOutput = (await execAsync('git log --pretty=format:"%H|%s|%an|%at" -n 10', { cwd: projectPath })).stdout;
+      const existingIds = new Set(this.projects.get(projectPath)?.builds.map((b) => b.id) || []);
+
+      const builds: CIBuild[] = [];
+      for (const line of logOutput.trim().split('\n')) {
+        if (!line.trim()) continue;
+        const [hash, message, author, unixTime] = line.split('|');
+        const buildId = `${provider}-${hash}`;
+        if (existingIds.has(buildId)) continue;
+
+        const startedAt = Number(unixTime) * 1000 || Date.now();
+        const build: CIBuild = {
+          id: buildId,
+          provider,
+          projectPath,
+          branch,
+          commitHash: (hash || '').substring(0, 8),
+          commitMessage: message || 'Unknown commit',
+          author: author || 'unknown',
+          status: 'unknown',
+          startedAt,
+          trigger: 'push',
+        };
+
+        builds.push(build);
+        this.projects.get(projectPath)?.builds.unshift(build);
+      }
+
+      return builds;
+    } catch {
+      return [];
+    }
   }
 
   // ===========================================

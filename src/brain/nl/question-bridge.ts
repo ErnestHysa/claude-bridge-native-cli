@@ -39,11 +39,13 @@ interface PendingQuestion extends Omit<AgentQuestion, 'timeout'> {
  */
 export class QuestionBridge {
   private pendingQuestions: Map<string, PendingQuestion>;
+  private multiSelectSelections: Map<string, Set<number>>;
   private bot: TelegramBot;
 
   constructor(bot: TelegramBot) {
     this.bot = bot;
     this.pendingQuestions = new Map();
+    this.multiSelectSelections = new Map();
   }
 
   /**
@@ -264,18 +266,38 @@ export class QuestionBridge {
         await this.bot.deleteMessage(chatId, query.message!.message_id);
         break;
 
-      case 'select':
-        // Multi-select toggle (visual only, actual selection tracked separately)
-        await this.bot.answerCallbackQuery(query.id);
-        // Update keyboard to show selection state
-        // (This would require storing selection state per question)
-        break;
+      case 'select': {
+        const optionIndex = parseInt(parts[3], 10);
+        if (Number.isNaN(optionIndex) || optionIndex < 0 || optionIndex >= pending.options.length) {
+          await this.bot.answerCallbackQuery(query.id, { text: 'Invalid selection', show_alert: true });
+          break;
+        }
 
-      case 'submit':
-        // Submit multi-select
-        // For now, just cancel - full implementation would track selections
-        await this.bot.answerCallbackQuery(query.id, { text: 'Please type your selections', show_alert: true });
+        const selections = this.multiSelectSelections.get(questionId) ?? new Set<number>();
+        if (selections.has(optionIndex)) {
+          selections.delete(optionIndex);
+        } else {
+          selections.add(optionIndex);
+        }
+        this.multiSelectSelections.set(questionId, selections);
+
+        await this.bot.answerCallbackQuery(query.id, {
+          text: selections.has(optionIndex) ? 'Selected' : 'Deselected',
+        });
         break;
+      }
+
+      case 'submit': {
+        const selections = this.multiSelectSelections.get(questionId) ?? new Set<number>();
+        const selectedValues = [...selections]
+          .filter(index => index >= 0 && index < pending.options.length)
+          .map(index => pending.options[index].value);
+
+        this.resolveQuestion(questionId, selectedValues);
+        await this.bot.answerCallbackQuery(query.id, { text: 'Answer recorded' });
+        await this.bot.deleteMessage(chatId, query.message!.message_id);
+        break;
+      }
 
       case 'cancel':
         // Cancel question
@@ -338,6 +360,7 @@ export class QuestionBridge {
 
     // Remove from pending
     this.pendingQuestions.delete(questionId);
+    this.multiSelectSelections.delete(questionId);
 
     // Resolve promise
     const response: QuestionResponse = {
@@ -360,6 +383,7 @@ export class QuestionBridge {
 
     clearTimeout(pending.timeoutHandle);
     this.pendingQuestions.delete(questionId);
+    this.multiSelectSelections.delete(questionId);
 
     // Resolve with empty response
     pending.resolve({

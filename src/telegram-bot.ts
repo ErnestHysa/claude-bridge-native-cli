@@ -48,6 +48,7 @@ import {
 // Worker imports for self-improvement system
 import { runHeartbeat, runProactiveChecksWorker } from "./brain/scripts/worker-manager.js";
 import { getHeartbeatStatus } from "./brain/scripts/heartbeat-worker.js";
+import { getQuestionBridge } from "./brain/nl/question-bridge.js";
 
 // Brain system initialization
 let brainInitialized = false;
@@ -4208,6 +4209,12 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
       return;
     }
 
+    // Let AskUserQuestion bridge consume its callback actions first
+    const questionBridge = getQuestionBridge(this.bot);
+    if (await questionBridge.handleCallbackQuery(query)) {
+      return;
+    }
+
     // Handle project selection
     if (data.startsWith(TelegramBotHandler.CB_SELECT_PROJECT)) {
       const projectName = data.slice(TelegramBotHandler.CB_SELECT_PROJECT.length);
@@ -4424,6 +4431,12 @@ Now with <b>agentic brain</b> capabilities for persistent memory and autonomous 
     // Check if user is in setup mode
     if (isInSetup(chatId)) {
       await handleSetupWizard(msg, this.bot);
+      return;
+    }
+
+    // If the agent is waiting for an AskUserQuestion response, route user text there
+    const questionBridge = getQuestionBridge(this.bot);
+    if (questionBridge.handleTextMessage(msg)) {
       return;
     }
 

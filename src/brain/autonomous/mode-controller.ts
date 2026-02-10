@@ -27,9 +27,12 @@ import type {
 } from '../types.js';
 import type { NightWorkTask } from './night-work-queue.js';
 import { Logger } from '../../utils.js';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 
 // Create a logger instance for this module
 const logger = new Logger('info');
+const execAsync = promisify(exec);
 
 // ===========================================
 // Events
@@ -310,7 +313,6 @@ export class AutonomousModeController {
 
   /**
    * Trigger autonomous work for a specific user
-   * This is a placeholder - the actual work will be implemented in later phases
    */
   private async triggerAutonomousWork(chatId: number): Promise<void> {
     // Prevent concurrent work for the same user
@@ -566,11 +568,27 @@ export class AutonomousModeController {
       }
 
       case 'dependency_update': {
-        // Use checkProject to get outdated dependencies
         const dependencyManager = getDependencyManager();
         const health = await dependencyManager.checkProject(opportunity.projectPath);
-        // For now, just report - actual updates would require explicit package names
-        return 'Dependencies checked: ' + health.outdated + ' outdated, ' + health.vulnerable + ' vulnerable';
+
+        // Apply safe patch updates automatically for the first few packages.
+        const patchUpdates = health.updatesAvailable
+          .filter(update => update.updateType === 'patch')
+          .slice(0, 5);
+
+        const updatedPackages: string[] = [];
+        for (const update of patchUpdates) {
+          const updated = await dependencyManager.updateDependency(opportunity.projectPath, update.name, update.wanted || update.latest);
+          if (updated) {
+            updatedPackages.push(update.name);
+          }
+        }
+
+        const updateSummary = updatedPackages.length > 0
+          ? ` Updated patch dependencies: ${updatedPackages.join(', ')}.`
+          : '';
+
+        return 'Dependencies checked: ' + health.outdated + ' outdated, ' + health.vulnerable + ' vulnerable.' + updateSummary;
       }
 
       case 'documentation': {
@@ -742,12 +760,18 @@ export class AutonomousModeController {
     error?: string;
   }> {
     try {
-      // For now, return a placeholder response
-      // In production, this would spawn a Claude CLI process
-      const truncatedPrompt = prompt.slice(0, 100) + '...';
+      const { stdout, stderr } = await execAsync(
+        `claude --print --dangerously-skip-permissions ${JSON.stringify(prompt)}`,
+        {
+          cwd: projectPath,
+          timeout: 15 * 60 * 1000,
+          maxBuffer: 10 * 1024 * 1024,
+        }
+      );
+
       return {
         success: true,
-        output: 'Task executed on ' + projectPath + ': ' + truncatedPrompt,
+        output: [stdout, stderr].filter(Boolean).join('\n').trim(),
       };
     } catch (error) {
       return {
